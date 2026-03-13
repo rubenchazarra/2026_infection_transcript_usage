@@ -1,0 +1,288 @@
+---
+title: "infectionDE-Enrichment"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+
+- Figure 2 H. --> Pathway enrichment analysis of COV response infection DTU genes. Two gene sets are considered: i) all infection-DTU genes, ii) DTU genes shared with upregulated infection DEGs and use all genes tested in the DTU analysis as background (Hypergeometric test). GO biological terms (FDR<0.05) were grouped using rrvgo (58). Dot shade intensity and size reflects the fraction and absolute number of GO terms per grouped terms, respectively.
+
+
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/01_infectionDTU/02_DA/")
+
+suppressPackageStartupMessages(require(enrichplot)) 
+suppressPackageStartupMessages(require(ggplot2))
+suppressPackageStartupMessages(require(scales))
+suppressPackageStartupMessages( require(rrvgo) )
+suppressPackageStartupMessages(require(org.Hs.eg.db))
+```
+
+
+
+# 1. Data Processing
+
+## 1.1 Restructure
+- Get significant ORA results, and restructure data for plotting
+
+```{r}
+dtu.ora <- readRDS("04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-ORA-clusterProfiler-GO-01_lineage.rds")
+
+get.result.ora <- function ( df, fdr.thres ) {
+  if ( class(df) == "list" ) { lapply (df, function(df) get.result.ora(df, fdr.thres))
+  } else { # class == "enrichResult"
+    if(!is.null(df)){
+    df = df@result # get data.frame
+    df = df[ df$p.adjust < fdr.thres, ]
+    return(df)
+    }
+  }
+}
+
+dtu.ora = get.result.ora(dtu.ora,fdr.thres = 0.05)
+
+# Restructure to cell type > database > condition > subset
+# 1. Restucture to cell type > condition > database > subset
+dtu.ora = lapply(dtu.ora, function(ct)
+  lapply(ct, function(cond){
+    list(
+      "BP" = lapply(cond, function(x) x[["BP"]]) # , 
+      # "MF" = lapply(cond, function(x) x[["MF"]]), # excluding these databases in last run
+      # "CC" = lapply(cond, function(x) x[["CC"]])
+      )
+  }))
+
+# 2. Restucture to cell type > database > condition > subset
+dtu.ora = lapply(dtu.ora, function(ct){
+    list(
+      "BP" = lapply(ct, function(x) x[["BP"]])#, 
+      #"MF" = lapply(ct, function(x) x[["MF"]]),
+      #"CC" = lapply(ct, function(x) x[["CC"]])
+      )
+  })
+
+# Merge
+## By set
+dtu.ora <- lapply(dtu.ora, function(ct)
+  lapply(ct, function(db)
+    lapply(db, function(cond) plyr::ldply(cond, .id = "set"))
+  ))
+
+## By Condition
+dtu.ora <- lapply(dtu.ora, function(ct)
+  lapply(ct, function(db) plyr::ldply(db, .id = "Condition"))
+  )
+
+## unlist 1 level 
+dtu.ora <- unlist(dtu.ora, recursive = F)
+# remove  empty
+dtu.ora <- dtu.ora[ unlist(lapply(dtu.ora, nrow)) > 0 ]
+
+# Save grouped data
+file.name <- "04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/02_infectionDTU-ORA-filtered-grouped-01_lineage.rds"
+saveRDS( dtu.ora, file.name )
+```
+
+## 1.2 Add Odds Ratio to ORA results based on GeneRatio and BgRatio values 
+
+```{r}
+# Add Odds Ratio (and 95% CI) to clusterProfiler enrichGO results
+add_enrichment_or <- function(enrich_res, method = c("fisher", "closed_form")) {
+  if(class(enrich_res) == "list"){ 
+    lapply(enrich_res, function(x) add_enrichment_or(x, method = c("fisher", "closed_form")))
+  }else{
+  method <- match.arg(method)
+  df <- as.data.frame(enrich_res)
+
+  if (!all(c("GeneRatio", "BgRatio", "Count") %in% names(df))) {
+    stop("Expected columns 'GeneRatio', 'BgRatio', and 'Count' not found.")
+  }
+
+  # Parse ratios safely
+  parse_ratio_num <- function(x, idx) {
+    # idx=1 numerator, idx=2 denominator
+    as.numeric(vapply(strsplit(x, "/", fixed = TRUE), function(z) z[[idx]], FUN.VALUE = character(1L)))
+  }
+
+  k <- as.numeric(df$Count)                                   # overlap in query ∩ term
+  n <- parse_ratio_num(df$GeneRatio, 2L)                      # size of query
+  M <- parse_ratio_num(df$BgRatio, 1L)                        # term size in background
+  N <- parse_ratio_num(df$BgRatio, 2L)                        # background size
+
+  # Sanity checks to catch inconsistencies early
+  bad <- is.na(k) | is.na(n) | is.na(M) | is.na(N) | k > n | k > M | n > N | M > N
+  if (any(bad)) {
+    warning("Some rows have inconsistent counts; OR set to NA for those rows.")
+  }
+
+  # Compute ORs
+  or <- rep(NA_real_, nrow(df))
+  ci_lo <- rep(NA_real_, nrow(df))
+  ci_hi <- rep(NA_real_, nrow(df))
+
+  for (i in seq_len(nrow(df))) {
+    if (bad[i]) next
+
+    a <- k[i]
+    b <- n[i] - k[i]
+    c <- M[i] - k[i]
+    d <- N[i] - M[i] - b
+
+    if (any(c(a, b, c, d) < 0)) {
+      next
+    }
+
+    if (method == "fisher") {
+      # Why: fisher.test gives finite OR + exact CI, handles zeros better than closed-form
+      mat <- matrix(c(a, b, c, d), nrow = 2,
+                    dimnames = list(c("Query", "NotQuery"), c("InTerm", "NotInTerm")))
+      ft <- suppressWarnings(fisher.test(mat, alternative = "greater"))
+      or[i] <- unname(ft$estimate)
+      ci_lo[i] <- ft$conf.int[1]
+      ci_hi[i] <- ft$conf.int[2]
+    } else {
+      # Closed-form; may be Inf with zeros
+      num <- a * d
+      den <- b * c
+      if (den == 0) {
+        or[i] <- Inf
+        ci_lo[i] <- NA_real_
+        ci_hi[i] <- NA_real_
+      } else {
+        or[i] <- num / den
+        ci_lo[i] <- NA_real_
+        ci_hi[i] <- NA_real_
+      }
+    }
+  }
+
+  df$odds_ratio <- or
+  df$or_ci_low  <- ci_lo
+  df$or_ci_high <- ci_hi
+  df
+  }
+}
+# Run OR
+file.name <- "04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/02_infectionDTU-ORA-filtered-grouped-01_lineage.rds"
+dtu.ora <- readRDS(file.name)
+dtu.ora <-  add_enrichment_or(dtu.ora, method="fisher")
+saveRDS(dtu.ora, file.name)
+```
+
+
+## 1.3 Group GO::Biological Process terms by similarity with revigo 
+
+*We group similar GO terms with rrvgo (Sayols, 2023) to be able to fit a main figure*
+
+```{r}
+file.name <- "04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-ORA-clusterProfiler-GO-01_lineage.rds"
+dtu.ora <- readRDS( file.name)
+# dtu.ora <- dtu.ora$lineage
+# 1. Select 
+dtu.ora <- get.result.ora(dtu.ora, fdr.thres = 0.05)
+# 2. Group with revigo
+rrvgo <- function ( df, db = "BP", p.value.thres = 0.05, sim.thres = 0.7 ){
+  if(class(df) == "list"){ lapply(df, function(df) rrvgo(df, db, p.value.thres, sim.thres ))
+  }else{
+    print("Calculating the similarity matrix and reducing GO terms")
+    if(!is.null(df)){
+      if(nrow(df) > 1){
+    # 0. Filter again by p.value
+    df <- df[df$p.adjust < p.value.thres, ]
+    # 1. Calculating the similarity matrix and reducing GO terms
+    simMatrix <- calculateSimMatrix(df$ID, orgdb="org.Hs.eg.db", ont = db, method="Rel")
+    # 2. Group terms based on similarity
+    scores <- setNames(-log10(df$qvalue), df$ID) # in vignette they use q_value
+    reducedTerms <- reduceSimMatrix(simMatrix, 
+                                    scores, 
+                                    threshold=sim.thres, 
+                                    orgdb="org.Hs.eg.db")
+    # 3. Add to ORA df
+    merge(df, reducedTerms, by.x = "ID", by.y = "go")
+      }
+    }
+  }
+}
+
+rrvgo.l <- rrvgo( dtu.ora, db = "BP", p.value.thres = 0.05, sim.thres = 0.7)
+
+#  3. Summarise df *Get N of GO terms per grouped term and relative fraction*
+count.rrvigo <- function(df) {
+  if(class(df) == "list"){ lapply(df, count.rrvigo)
+  }else{
+    if(!is.null(df)){
+    ## N of go_terms in each parent_term for each cell type and comparison
+    n.go.terms.per.parent = df %>% group_by(parentTerm) %>% summarise(n_terms_parent = n_distinct(term))
+    ## Total N of GO terms
+    n.terms.total <- df %>% summarise(n_terms_total = n_distinct(term))
+    ## Merge to calculate rel freq
+    count.df = merge(n.go.terms.per.parent, n.terms.total)
+    ## Relative N of terms
+    count.df[["n_terms_parent_rel"]] <- count.df$n_terms_parent /  count.df$n_terms_total
+    return(count.df)
+    }
+  }
+}
+
+count.rrvgo.l <- count.rrvigo(rrvgo.l)
+# Merge
+# By database
+l <- lapply(count.rrvgo.l, function(ct) lapply(ct, function(c) lapply(c, function(set) plyr::ldply(set, .id = "GO_database")) ))
+# By set
+l <- lapply(l, function(ct) lapply(ct, function(c) plyr::ldply(c, .id = "set")) )
+# By Condition
+l <- lapply(l, function(ct) plyr::ldply(ct, .id = "Condition"))
+
+# Save
+file.name <- "04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/03_infectionDTU-ORA-revigo-grouped-terms-sim-0.7.rds"
+saveRDS( l, file.name )
+```
+ 
+
+# 2. Figure 2H  Infection DTU in response to COV Overrepresentation analysis
+
+```{r}
+file.name <- "04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/03_infectionDTU-ORA-revigo-grouped-terms-sim-0.7.rds"
+term.l <- readRDS(file.name)
+df <- plyr::ldply(term.l, .id = "celltype")
+df <- df[ df$Condition %in% c("COV.NS"), ]
+df <- df[df$set %in% c("DTU.all", "DTU.DGE.Up"), ]
+
+df$celltype <- factor(df$celltype, levels = lineage.df$lineage)
+df$Condition <- factor(df$Condition, levels = names(condition.pairwise.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+df$set <- factor(df$set, levels = c("DTU.all", "DTU.DGE.Up"))
+df$set <- plyr::revalue(df$set, c("DTU.all" = "DTU", "DTU.DGE.Up" = "DTU-DGE Up"))
+
+plt <- ggplot(df,  aes(x = celltype, y = parentTerm)) + 
+    geom_point( shape = 21, stroke=NA, 
+                aes ( fill = celltype, alpha = n_terms_parent_rel, size = n_terms_parent)) +
+    facet_grid(  ~ set, space = "free", scales = "free",  drop = T, switch="y") +
+  xlab("Gene set") +
+    scale_size_continuous("N GO terms\nin grouped term", range = c(1, 4)) +
+    scale_alpha_continuous("% GO terms\nper grouped term ", range = c(0.2, 1)) +
+    scale_fill_manual("Lineage", values = lineage.color.vec) +
+    scale_color_manual("", values = lineage.color.vec) +
+    scale_y_discrete(labels = function(x) stringr::str_trunc(x, 40), limits = rev) +
+    # scale_x_discrete(labels = set.rename.vec, drop=FALSE) +
+    plot_theme +   
+    theme(plot.title = element_blank(),
+          panel.grid = element_line(color = "grey", linewidth = 0.1), 
+          axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), 
+          axis.title.x = element_blank(), axis.title.y = element_blank()) + 
+  guides(color = FALSE,
+         fill = guide_legend(order = 1, override.aes = list(color = "white", size = 2)),
+         size =guide_legend(order = 2, override.aes = list(color = "white", fill="black", order = 2)),
+         alpha=guide_legend(order = 3, override.aes = list(label = "", size = 2, ncol=1, 
+                                                           color = "white",fill = "black", order = 3))
+            )
+plt
+
+file.name <-"04_infectionDTU-ORA/02_Plots/05_Filt-1-5-0.8-0.01/04_03_infectionDTU-ORA-COV.NS-rrvgo-sim-0.7.pdf"
+ggsave(file.name, plt, width = 9, height = 8.5, units = "cm")
+```
+

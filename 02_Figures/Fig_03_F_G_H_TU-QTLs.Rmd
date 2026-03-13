@@ -1,0 +1,213 @@
+---
+title: "01_DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal
+
+Figure 3.  
+- f) Number of genes with a TU-QTL across lineages and conditions. 
+- g) Enrichment in TU-QTLs among population DTU genes. For each immune lineage and condition, the bars indicate the percentage of genes with a significant TU-QTL among population DTU tested and significant genes, respectively. 
+- h) Heatmap of TU-QTLs sharing based on the spearman correlation of MD values considering gene-SNP pairs significant in at least one of the lineage-condition comparisons. In addition, hierarchical clustering of lineage-condition pairs is displayed.
+
+
+
+- Load functions
+```{r}
+source("../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../01_Randolph2021/05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../06_sQTL/03_DA/")
+```
+
+
+# ADD to 0.2 Pre-processing
+*In 00_collect-sQTLseekeR2-results.R* 
+
+# Fig. 3.F
+
+*Figure 3.f) Number of genes with a TU-QTL across lineages and conditions. *
+
+- Get numbers in paper
+```{r}
+df = readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+count.df <- df %>% group_by(lineage, Condition) %>% summarise(n_genes = n_distinct(geneId), n_snps = n_distinct(snpId))
+# N SNPs
+count.df[which.min(count.df$n_snps), ]
+count.df[which.max(count.df$n_snps), ]
+# N genes
+count.df[which.min(count.df$n_genes), ]
+count.df[which.max(count.df$n_genes), ]
+```
+
+
+- Plot
+```{r}
+df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_genes = n_distinct(geneId))
+
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$lineage <- factor(df$lineage, levels = rev(names(color.vec)))
+
+# Plot 
+x_lab <- "N Genes with a TU-QTL"
+
+# Plot 
+plt <- ggplot(data = df, aes(x = n_genes, y = lineage, fill = lineage, color = lineage)) +
+  geom_bar(stat= "identity", linewidth=0.25) + 
+  geom_text(data = df, aes(x = n_genes, label = n_genes), color = "black",  size = 5/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_color_manual( values = lineage.color.vec ) +
+   xlab(x_lab) + 
+  plot_theme + theme(axis.title.y = element_blank()) + 
+  guides(fill = FALSE,  color = FALSE )
+plt
+
+# # Merge with N cells per lineage 
+# plt <- cowplot::plot_grid(
+#     # 1) N cells / cell type
+#     n_cell.lineage.by.condition.plt,
+#     # 2) N tested genes
+#     plt +  theme(strip.text.y = element_blank(), strip.background = element_blank(),
+#                  axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.line.y = element_blank()),
+#     nrow = 1, align = "h", axis = "tb" , rel_widths =  c(0.5, 0.5)
+#     )
+
+# Save
+file.name <- "02_Plots/03_celltype-fractions/01_01_N-TU-Genes-by-Condtion.pdf"
+ggsave(file.name, plt, width = 4.5, height = 5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 4.5, height = 5, units = "cm", bg = "white")
+```
+
+# Fig. 3.G
+
+*Figure 3.  g) Enrichment in TU-QTLs among population DTU genes. For each immune lineage and condition, the bars indicate the percentage of genes with a significant TU-QTL among population DTU tested and significant genes, respectively.*
+
+## Plot
+
+*% of popDTU genes with a TU QTL and % of all tested with a TU QTL*
+```{r}
+# Load QTLs
+qtl.sig <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+qtl.sig <- qtl.sig %>% distinct(lineage, Condition, gene_name)
+qtl.sig$is.QTL <- T
+
+# PopDTU tested
+dtu.all <- readRDS("../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-df.rds")
+dtu.all <- dtu.all$lineage
+dtu.all$lineage <- dtu.all$celltype
+dtu.all <- dtu.all %>% distinct(lineage, Condition, gene_name, fdr)
+dtu.all$is.DTU <- ifelse(dtu.all$fdr < 0.05,  T, F)
+# Merge 
+df <- merge(dtu.all, qtl.sig, by = c("lineage", "Condition", "gene_name"), all.x = T, all.y = F)
+df[is.na(df$is.QTL), "is.QTL"] <- F
+
+# Count how many of popDTU and non popDTU have a TU-QTL
+df <- df %>% group_by(lineage, Condition, is.DTU, is.QTL) %>% summarise(n_genes = n_distinct(gene_name))
+df <- df %>% group_by(lineage, Condition, is.DTU) %>% mutate( n_genes_rel = n_genes / sum(n_genes)) 
+# We are interested in those genes with a QTL
+df <- df[df$is.QTL, ]
+# new label 
+df$class <- ifelse(df$is.DTU & df$is.QTL, "popDTU", "Tested")
+
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+color.vec <- setNames(lineage.df$color, nm = rev(lineage.df$lineage))
+df$lineage <- factor(df$lineage, levels = names(color.vec))
+
+# Plot 
+y_lab <- "N of TU-Genes"
+
+# Plot 
+plt <- ggplot(data = df, aes(y = lineage, x = n_genes_rel, fill = lineage, alpha = class)) +
+  geom_bar(stat= "identity", linewidth=0.2, position = position_dodge()) + 
+  scale_alpha_manual("", values = c(0.5, 1)) +
+  # geom_text(data = df, aes(y = shared.rel.1, label = shared), # Text labels
+  #           color = "black", alpha = 1,  size = 5/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  # geom_text(aes(x = lineage, y = label_y, label = p_value_label), vjust = 0, size = 1.75) + 
+  facet_grid( Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  xlab("Genes with a TU-QTL (%)") + 
+  plot_theme + theme(axis.title.y = element_blank()#, , 
+                     #axis.text.x = element_text(angle = 30, vjust = 0.5, hjust = 0.5), 
+                     #legend.position = "bottom"
+                     ) + 
+  guides(fill = FALSE,  color = FALSE, 
+         alpha = guide_legend(override.aes = list(label = "", size = 1, ncol=1), reverse = T))
+
+# 
+file.name <- paste0("02_Plots/03_celltype-fractions/03_01_Overlaps-PopDTU-02_relative-count-02_Genome-wide.pdf")
+ggsave(file.name, plt, width = 5, height = 5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 5, height = 5, units = "cm", bg = "white")
+```
+
+## Overlap statistics of TU-QTL genes with popDTU genes
+
+- DTU genes
+```{r}
+dtu.l <- readRDS("../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds")
+dtu.l <- dtu.l$lineage
+```
+
+- Process QTLs
+```{r}
+qtl.sig <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+qtl.sig <- qtl.sig %>% distinct(lineage, Condition, gene_name, fdr)
+# add tested genes
+qtls.all <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-df.rds")
+# colnames(qtls.all) <- plyr::revalue(colnames(qtls.all), c("cell.lineage" = "lineage", "condition" = "Condition"))
+# qtls.all$Condition <- plyr::revalue(qtls.all$Condition, c("Baseline" = "NS", "Influenza A Virus" = "IAV", "SARS-CoV-2" = "COV"))
+qtls.all <- qtls.all %>% distinct(lineage, Condition, gene_name)
+qtl <- merge(qtl.sig, qtls.all, by = c("lineage", "Condition", "gene_name"), all = T)
+qtl[ is.na(qtl$fdr), "fdr"] <- 1 # add 1 as FDR for NS gene-variant pairs
+# Split
+qtl.l <- split(qtl, qtl$lineage)
+qtl.l <- lapply(qtl.l, function(x) split(x, x$Condition))
+```
+
+- Overlap
+```{r}
+# check
+names(dtu.l) == names(qtl.l)
+
+ov.l <- test.overlap.pro( m1 = dtu.l,
+                  m2 = qtl.l,
+                  fdr.col.1 = "fdr", fdr.col.2 = "fdr",
+                  fdr.thres.1 = 0.05, fdr.thres.2 = 0.01,
+                  gene.col.1 = "gene_name", gene.col.2 = "gene_name", 
+                  FC.col.1 = NA, FC.col.2 = NA) 
+# merge by Condition 
+ov.l <- lapply(ov.l, function(x) plyr::ldply(x, .id = "Condition"))
+ov.df <- plyr::ldply(ov.l, .id = "lineage")
+ov.df <- add.p_value.label(ov.df, p_value.col = "p_value")
+# add relative counts
+df <- ov.df
+df.l <- lapply(c(1:nrow(df)), function(i){
+  x = df[i, ]
+  
+  model.1.total <- x[["model.1.specific"]] + x[["shared"]]
+  model.2.total <- x[["model.2.specific"]] + x[["shared"]]
+  
+  x[["model.1.specific.rel"]] <- x[["model.1.specific"]] / model.1.total
+  x[["model.2.specific.rel"]] <- x[["model.2.specific"]] / model.2.total
+  x[["shared.rel.1"]] <- x[["shared"]] / model.1.total
+  x[["shared.rel.2"]] <- x[["shared"]] / model.2.total
+  return(x)
+})
+
+df.i <- data.table::rbindlist(df.l)
+# add FDR
+df.i$fdr <- p.adjust(df.i$p_value)
+```
+
+
+# Fig 3.H 
+
+*Figure 3. h) Heatmap of TU-QTLs sharing based on the spearman correlation of MD values considering gene-SNP pairs significant in at least one of the lineage-condition comparisons. In addition, hierarchical clustering of lineage-condition pairs is displayed.*

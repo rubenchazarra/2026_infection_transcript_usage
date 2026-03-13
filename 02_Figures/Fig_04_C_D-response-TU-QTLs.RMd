@@ -1,0 +1,550 @@
+---
+title: "01_DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal
+
+*DA and plot generation for TU-QTL section* 
+```{r}
+source("../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../01_Randolph2021/05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../06_sQTL/03_DA/")
+```
+
+# Response TU-QTL
+
+*We define response TU QTLs as variants significantly associated with transcript usage only after infection (FDRIAV,COV < 0.01, pBaseline > 0.01)*
+
+## Processing
+
+```{r}
+# Get Tested
+df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-df.rds")
+of.interest <- c("lineage", "Condition", "geneId", "gene_name", "snpId", "pv", "md")
+df <- df[, of.interest]
+
+# Add Significant FDR
+sqtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+of.interest <- c("lineage", "Condition", "geneId", "gene_name", "snpId", "fdr")
+sqtl <- sqtl[ , of.interest]
+df <- merge(df, sqtl, by= c("lineage", "Condition", "geneId", "gene_name", "snpId"), all= T)
+
+iav <- df[df$Condition %in% "IAV", ]
+cov <- df[df$Condition %in% "COV", ]
+ns <- df[df$Condition %in% "NS", ]
+## Merge IAV & NS
+iav.ns <- merge(iav, ns, by = c("lineage", "geneId", "gene_name", "snpId"), all.x = F, all.y = F)
+revalue.vec <- c("Condition.x" = "Condition_1", "Condition.y" = "Condition_2", "md.x" = "MD.infected", "md.y" = "MD.baseline", "pv.x" = "p_value.infected", "pv.y" = "p_value.baseline", "fdr.x" = "fdr.infected", "fdr.y" = "fdr.baseline")
+names(iav.ns) <- plyr::revalue(names(iav.ns), revalue.vec)
+## Merge COV & NS
+cov.ns <- merge(cov, ns, by = c("lineage", "geneId", "gene_name", "snpId"), all.x = F, all.y = F)
+names(cov.ns) <- plyr::revalue(names(cov.ns), revalue.vec)
+
+# Save tested response TU-QTLs: one row per SNP
+df <- plyr::ldply(list("IAV_NS" = iav.ns, "COV_NS" = cov.ns), .id = "Condition")
+saveRDS(df, "01_Processed-Data/03_celltype-fractions/02_00_response-TU-QTLs-tested.rds")
+
+# Save significant response TU-QTLs
+df <- df[!is.na(df$fdr.infected) & df$fdr.infected < 0.01 & is.na(df$fdr.baseline ) & df$p_value.baseline > 0.01, ] # Explanation: here we select those snps which are significant at the FDR level in infected but didn't make it to the FDR level in Baseline (response TU-QTLs)
+saveRDS(df, "01_Processed-Data/03_celltype-fractions/02_01_response-TU-QTLs.rds")
+
+
+# Save v2: save response tu QTLs present in either IAV_NS or COV_NS or both. Change formating for plots.
+iav.cov <- merge(iav.ns, cov.ns, by = c("lineage", "geneId", "gene_name", "snpId"), all.x = F, all.y = F)
+names(iav.cov) <- gsub("\\.x", ".IAV_NS", names(iav.cov))
+names(iav.cov) <- gsub("\\.y", ".COV_NS", names(iav.cov))
+# Add MD delta 
+iav.cov$MD.delta.IAV_NS <- iav.cov$MD.infected.IAV_NS - iav.cov$MD.baseline.IAV_NS
+iav.cov$MD.delta.COV_NS <- iav.cov$MD.infected.COV_NS - iav.cov$MD.baseline.COV_NS
+# Keep response QTLs at least one of the Conditions
+re.qtls.iav_ns <- iav.cov$fdr.infected.IAV_NS < 0.01 & iav.cov$p_value.baseline.IAV_NS > 0.01 
+re.qtls.cov_ns <- iav.cov$fdr.infected.COV_NS < 0.01 & iav.cov$p_value.baseline.COV_NS > 0.01
+# Deal with NAs
+re.qtls.iav_ns[ is.na(re.qtls.iav_ns) ] <- F
+re.qtls.cov_ns[ is.na(re.qtls.cov_ns) ] <- F
+# Subset to re-tu-QTL in at least one Condition
+iav.cov <- iav.cov[ re.qtls.iav_ns | re.qtls.cov_ns, ]
+## add annotation 
+iav.cov$re.TuQTL.IAV_NS <- ifelse(!is.na(iav.cov$fdr.infected.IAV_NS), T, F)
+iav.cov$re.TuQTL.COV_NS <- ifelse(!is.na(iav.cov$fdr.infected.COV_NS), T, F)
+saveRDS(iav.cov, "01_Processed-Data/03_celltype-fractions/02_02_response-TU-QTLs-IAV.NS-or-COV.NS.rds")
+# save SNP ids for visualizations
+write.table(iav.cov[, "snpId", drop = F], "01_Processed-Data/03_celltype-fractions/02_02_response-TU-QTLs-IAV.NS-or-COV.NS-SNP-ids.txt", quote = F, row.names=F, col.names =F)
+```
+
+<!-- ### Version 2  -->
+<!-- ```{r} -->
+<!-- # Get Tested -->
+<!-- df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-df.rds") -->
+<!-- of.interest <- c("lineage", "Condition", "geneId", "gene_name", "snpId", "pv", "md") -->
+<!-- df <- df[, of.interest] -->
+
+<!-- # Add Significant FDR -->
+<!-- sqtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds") -->
+<!-- of.interest <- c("lineage", "Condition", "geneId", "gene_name", "snpId", "fdr") -->
+<!-- sqtl <- sqtl[ , of.interest] -->
+<!-- df <- merge(df, sqtl, by= c("lineage", "Condition", "geneId", "gene_name", "snpId"), all= T) -->
+
+<!-- iav <- df[df$Condition %in% "IAV", ] -->
+<!-- cov <- df[df$Condition %in% "COV", ] -->
+<!-- ns <- df[df$Condition %in% "NS", ] -->
+<!-- ## Merge IAV & NS -->
+<!-- iav.ns <- merge(iav, ns, by = c("lineage", "geneId", "gene_name", "snpId"), all.x = F, all.y = F) -->
+<!-- revalue.vec <- c("Condition.x" = "Condition_1", "Condition.y" = "Condition_2", "md.x" = "MD.infected", "md.y" = "MD.baseline", "pv.x" = "p_value.infected", "pv.y" = "p_value.baseline", "fdr.x" = "fdr.infected", "fdr.y" = "fdr.baseline") -->
+<!-- names(iav.ns) <- plyr::revalue(names(iav.ns), revalue.vec) -->
+<!-- ## Merge COV & NS -->
+<!-- cov.ns <- merge(cov, ns, by = c("lineage", "geneId", "gene_name", "snpId"), all.x = F, all.y = F) -->
+<!-- names(cov.ns) <- plyr::revalue(names(cov.ns), revalue.vec) -->
+<!-- # Save v1: one row per SNP -->
+<!-- df <- plyr::ldply(list("IAV_NS" = iav.ns, "COV_NS" = cov.ns), .id = "Condition") -->
+<!-- saveRDS(df, "01_Processed-Data/03_celltype-fractions/02_00_response-TU-QTLs-tested.rds") -->
+<!-- df <- df[!is.na(df$fdr.infected) & df$fdr.infected < 0.01 & is.na(df$fdr.baseline ) & df$p_value.baseline > 0.01, ] # Explanation: here we select those snps which are significant at the FDR level in infected but didn't make it to the FDR level in Baseline (response TU-QTLs) -->
+<!-- saveRDS(df, "01_Processed-Data/03_celltype-fractions/02_01_response-TU-QTLs.rds") -->
+<!-- ``` -->
+<!-- ``` -->
+
+# N of re-TU-QTLs
+
+```{r}
+df <- readRDS( "01_Processed-Data/03_celltype-fractions/02_01_response-TU-QTLs.rds" )
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_genes = n_distinct(geneId)) 
+
+# df$Condition <- gsub("_", ".", df$Condition)
+# df$Condition <- factor(df$Condition, levels = rev(names(condition.pairwise.vec.short)))
+# df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+df$Condition <- factor(df$Condition, levels = rev(c("IAV_NS", "COV_NS")))
+df$Condition <- plyr::revalue(df$Condition, c("IAV_NS" = "IAV", "COV_NS" = "COV"))
+df$lineage <- factor(df$lineage, levels = rev(lineage.df$lineage))
+
+# Plot 
+x_lab <- "Genes with a re-TU-QTL"
+plt <- ggplot(data = df, aes(y = lineage, x = n_genes, fill = Condition)) +
+  geom_bar(stat= "identity", linewidth=0.2, position = position_dodge()) + 
+  scale_fill_manual( "Response", values = condition.color.vec.short ) +
+  xlab(x_lab) + 
+  plot_theme + theme(axis.title.y = element_blank(), 
+                     legend.position=c(0.8, 0.45))+ 
+  guides(fill = guide_legend(reverse = T))#, 
+#+ guides(fill = FALSE,  color = FALSE,  alpha = guide_legend(override.aes = list(label = "", size = 1), nrow=2, reverse = T))
+
+# 
+file.name <- "02_Plots/03_celltype-fractions/04_01_N-response-TU-QTL-Genes.pdf"
+ggsave(file.name, plt, width = 4, height = 4.25, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 4, height = 4.25, units = "cm", bg = "white")
+```
+
+
+# Fig 4. C
+*Condition sharing *
+```{r}
+df  <- readRDS("01_Processed-Data/03_celltype-fractions/02_00_response-TU-QTLs-tested.rds")
+df$geneId_snpId <- paste0(df$geneId, "_", df$snpId)
+# Split by lineage and Condition
+df.l <- split(df, df$lineage)
+df.l <- lapply(df.l, function(x) split(x, x$Condition))
+# Subset to variants tested in all Conditions across lineages (To be fair we should have the separate intersection of IAV_Baseline and COV_Baseline ), in any case, we are being more restrictive
+df.l <- lapply(df.l, function(c){
+  vec = Reduce(intersect, lapply(c, function(x) x$geneId_snpId))
+  print(length(vec))
+  lapply(c, function(x) x[x$geneId_snpId %in% vec, ])
+  })
+df.l <- lapply(df.l, function(c) plyr::ldply(c, .id = "Condition"))
+df <- plyr::ldply(df.l, .id = "lineage")
+
+# Filter
+df <- df[!is.na(df$fdr.infected) & df$fdr.infected < 0.01 & is.na(df$fdr.baseline ) & df$p_value.baseline > 0.01, ] # Explanation: here we select those snps which are significant at the FDR level in infected but didn't make it to the FDR level in Baseline (response TU-QTLs)
+
+# Count sharing
+df <- df %>% group_by(lineage, geneId_snpId) %>% summarise(n_conditions = n_distinct(Condition), Condition = paste(Condition, collapse = ","))
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_qtls = n_distinct(geneId_snpId))
+df <- df %>% group_by(lineage) %>% mutate(n_qtls_rel = n_qtls /sum(n_qtls))
+df
+# Fraction of response TU-QTLs shared by IAV and COV
+df[df$Condition %in% "IAV_NS,COV_NS", ]
+# Fraction of response TU-QTLs spectifi to IAV or COV
+df[df$Condition %in% c("IAV_NS", "COV_NS"), ]
+# Fraction of response TU-QTLs spectifi to IAV and COV
+df[df$Condition %in% c("IAV_NS", "COV_NS"), ] %>% group_by(lineage) %>% summarise(n_qtls_rel = sum(n_qtls_rel))
+```
+
+- Plot 
+```{r}
+df$Condition <- plyr::revalue(df$Condition, c("IAV_NS" = "IAV", "IAV_NS,COV_NS" = "Both", "COV_NS" = "COV"))
+df$Condition <- factor(df$Condition, levels = rev(c("IAV", "Both", "COV")))
+df$lineage <- factor(df$lineage, levels = rev(lineage.df$lineage))
+color.vec <- c("Both" = "#f1faee", "IAV" = "#75A9D1", "COV"= "#c1121f")
+
+# Plot 
+x_lab <- "N of response TU-QTLs"
+plt <- ggplot(data = df, aes(y = lineage, x = n_qtls, fill = Condition)) +
+  #geom_bar(stat= "identity", linewidth=0.2, position = position_dodge()) + 
+  geom_bar(stat= "identity", linewidth=0.2, position = "stack") + 
+  scale_fill_manual( "Response", values = color.vec ) +
+  xlab(x_lab) + 
+  plot_theme + theme(axis.title.y = element_blank(), 
+                     legend.position=c(0.8, 0.3))+ 
+  guides(fill = guide_legend(reverse = T))#, 
+#+ guides(fill = FALSE,  color = FALSE,  alpha = guide_legend(override.aes = list(label = "", size = 1), nrow=2, reverse = T))
+
+# 
+file.name <- "02_Plots/03_celltype-fractions/04_03_01_response-TU-QTL-Condition-sharing.pdf"
+ggsave(file.name, plt, width = 4, height = 4.25, units = "cm")
+# file.name <- gsub(".pdf", ".svg", file.name)
+# ggsave(file.name, plt, width = 4, height = 4.25, units = "cm", bg = "white")
+```
+
+
+# Fig 4. E
+
+*4.2 re-QTLs to IAV and COV Effect size scatter*
+*Scatter plot of MD(IAV-Baseline) vs (COV-Baseline) for reQTLs*
+
+- Correlate effect sizes
+```{r}
+df <- readRDS("01_Processed-Data/03_celltype-fractions/02_02_response-TU-QTLs-IAV.NS-or-COV.NS.rds")
+
+# All
+df %>% group_by(lineage) %>% summarise( cor = cor(MD.delta.IAV_NS, MD.delta.COV_NS, method = "pearson"), 
+                                        p_value = cor.test(MD.delta.IAV_NS, MD.delta.COV_NS, method = "pearson")$p.value,.groups = "drop")
+
+# Detected in both
+length(unique(df[df$re.TuQTL.IAV_NS & df$re.TuQTL.COV_NS, ]))
+cor.df <- df[df$re.TuQTL.IAV_NS & df$re.TuQTL.COV_NS, ] %>% group_by(lineage) %>% summarise( cor = cor(MD.delta.IAV_NS, MD.delta.COV_NS, method = "pearson"), 
+                                                                                             p_value = cor.test(MD.delta.IAV_NS, MD.delta.COV_NS, method = "pearson")$p.value,.groups = "drop")
+```
+
+- Which are the STRONGEST response-TU-QTLs ? 
+```{r}
+df <- readRDS("01_Processed-Data/03_celltype-fractions/02_02_response-TU-QTLs-IAV.NS-or-COV.NS.rds")
+
+df[which.max(df$MD.delta.IAV_NS), ]
+df[which.max(df$MD.delta.COV_NS), ]
+```
+
+- Plot
+```{r}
+# Plot 
+df <- readRDS( "01_Processed-Data/03_celltype-fractions/02_02_response-TU-QTLs-IAV.NS-or-COV.NS.rds" )
+# Add whether re-TU-QTLs are in IAV or COV response or both
+df$Condition <- paste0(df$re.TuQTL.IAV_NS, "_", df$re.TuQTL.COV_NS)
+df$Condition <- plyr::revalue(df$Condition, c("FALSE_TRUE" = "COV", "TRUE_FALSE" = "IAV", "TRUE_TRUE" = "Both"))
+color.vec <- c("Both" = "#e0e1dd", "IAV" = "#75A9D1", "COV"= "#c1121f")
+df$Condition <- factor(df$Condition, levels = c("IAV", "COV", "Both"))
+
+lineage.color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$lineage <- factor(df$lineage, levels = names(color.vec))
+
+plt <- ggplot(data = df, aes(x = MD.delta.COV_NS, y = MD.delta.IAV_NS, color = Condition)) + 
+  xlim(-0.05, 0.12) + ylim(-0.05, 0.12) + 
+  geom_point(size = 0.25) + 
+  geom_vline(aes(xintercept = 0), linewidth = 0.25) +
+  geom_hline(aes(yintercept = 0), linewidth = 0.25) +
+  scale_color_manual("Response", values = color.vec ) +
+  xlab("COV reTU-QTL effect size") + ylab("IAV reTU-QTL effect size") + 
+  plot_theme + 
+  guides(color = guide_legend(override.aes = list(size = 1)))
+
+file.name <- paste0("02_Plots/03_celltype-fractions/04_02_response-TU-QTL_02-all-reQTLs-color-Condition.pdf")
+ggsave(file.name, plt, width = 5.5, height = 4.5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 5.5, height = 4.5, units = "cm", bg = "white")
+```
+
+
+# Overlap reTU-QTLs with population * infection DTU interaction
+
+*We found no significant overlap*
+
+- popDRTU
+```{r}
+pop.l <-  readRDS("../../03_Differential/02_DTU/02_DTU/03_interactionDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_interactionDTU-unfiltered-list.rds")
+pop.l <- pop.l$lineage
+pop.l <- lapply(pop.l, function(x) x[c("IAV.NS", "COV.NS")])
+
+# v2 definition of interaction 
+# pop <-  readRDS("../../03_Differential/02_DTU/02_DTU/03_interactionDTU/02_DA/01_Processed-Data/07_split-inf-baseline/01_interactionDTU-unfiltered-df.rds")
+# pop.l <- split(pop, pop$celltype)
+# pop.l <- lapply(pop.l, function(x) split(x, x$Condition))
+```
+
+- Our data
+```{r}
+df <- readRDS( "01_Processed-Data/03_celltype-fractions/02_00_response-TU-QTLs-tested.rds" )
+# df <- readRDS( "01_Processed-Data/03_celltype-fractions/02_00_response-TU-QTLs-tested-v02.rds" )
+df$Condition <- plyr::revalue(df$Condition, c("IAV_NS" = "IAV.NS", "COV_NS" = "COV.NS"))
+df.l <- split(df, df$lineage)
+df.l <- lapply(df.l, function(x) split(x, x$Condition))
+```
+
+- Overlap
+```{r}
+lineages <- names(pop.l)
+conditions <- names(pop.l$B)
+
+overlap.l <- lapply(lineages, function(ct) lapply(conditions, function(x) {
+  print(paste0(ct, "_", x))
+  df.1 <- df.l[[ct]][[x]]
+  df.2 <- pop.l[[ct]][[x]]
+  
+  sig_1 <- unique(df.1[!is.na(df.1$fdr.infected) & df.1$fdr.infected < 0.01 & is.na(df.1$fdr.baseline ) & df.1$p_value.baseline > 0.01, "gene_name"])
+  # sig_1 <- unique(df.1[ df.1$fdr.infected < 0.01 & df.1$fdr.infected < df.1$fdr.baseline & df.1$MD.infected > df.1$MD.baseline, "gene_name"])
+  
+  # Explanation: here we select those snps which are significant at the FDR level in infected but didn't make it to the FDR level in Baseline (response TU-QTLs)
+  all_1 <- unique(df.1$gene_name)
+  sig_2 <- df.2[df.2$fdr < 0.1, "gene_name", drop = T] # population * infection TU interaction at FDR < 0.1
+  # sig_2 <- df.2[df.2$p.value < 0.1, "gene_name", drop = T] # population * infection TU interaction at p value < 0.1
+  # sig_2 <- df.2[df.2$is.interaction, "gene_name" ]  # v2 definition of pop*infection TU interaction
+  all_2 <- df.2[, "gene_name", drop = T] 
+  
+  df <- data.frame("shared" = length( intersect( sig_1, sig_2 )),
+                   "model.1.specific" = length( setdiff( sig_1, sig_2 )), # model specific but SIG
+                   "model.2.specific" = length( setdiff( sig_2, sig_1 )) )
+  # contingency table
+  cont.tab <- contingency.table.fun(sig_1, sig_2, all_1, all_2)
+  ## add contingency table values
+  df[["S12"]] <- cont.tab[1, 1] ; df[["S1_NS2"]] <- cont.tab[2, 1] ; df[["S2_NS1"]] <- cont.tab[1, 2] ; df[["NS12"]] <- cont.tab[2, 2]
+
+  # Fisher exact test
+  fisher_result <- fisher.test(cont.tab)
+  df[["p_value"]] <- fisher_result$p.value
+  df[["odds.ratio"]] <- fisher_result$estimate[["odds ratio"]]
+  df[["conf.int.lower"]] <- fisher_result$conf.int[1]
+  df[["conf.int.upper"]] <- fisher_result$conf.int[2]
+
+  return(df)
+}))
+
+overlap.l <- lapply(overlap.l, function(ct) setNames(ct, conditions))
+overlap.l <- setNames(overlap.l, lineages)
+
+# Merge
+overlap.l <- lapply(overlap.l, function(ct) plyr::ldply(ct, .id = "Condition"))
+overlap.df <- plyr::ldply(overlap.l, .id = "lineage")
+overlap.df$fdr <- p.adjust(overlap.df$p_value)
+overlap.df
+# saveRDS(overlap.df, "01_Processed-Data/03_celltype-fractions/02_04_05_response-TU-QTLs-overlap-popDRTU-split-metrics.rds")
+```
+# Supp. Fig. 21.
+
+*Response TU-QTLs sharing Upset for: i) genes , ii ) QTLs*
+
+- Read data 
+```{r}
+df <- readRDS( "01_Processed-Data/03_celltype-fractions/02_01_response-TU-QTLs.rds" )
+df$Condition <- gsub("_", ".", df$Condition)
+df$lineage_Condition <- paste0(df$lineage, "_", df$Condition)
+df$geneId_snpId <- paste0(df$geneId, "_", df$snpId)
+# Split by lineage_Condition unlist one level
+df.l <- split(df, df$lineage_Condition)
+# Get gene_id
+# df.l <- lapply(df.l, function(x) x$geneId) # gene sharing
+df.l <- lapply(df.l, function(x) x$geneId_snpId) # snpId sharing
+# Pre-process for upset
+df <- prepare.ComplexUpset(df.l)
+```
+
+- ComplexUpset Plot * Work has to be done here*
+```{r}
+# naming
+# colnames(df) <-  gsub("(.*)\\.(.*\\..*)", "\\1_\\2", colnames(df))
+name.df <- data.frame(ct_condition = colnames(df))
+name.df$lineage <- gsub("_.*", "", name.df$ct_condition)
+name.df$Condition <-  gsub(".*_", "", name.df$ct_condition)
+name.df <- merge(name.df,  lineage.df[, c("lineage", "color")], by = "lineage")
+name.df$Condition_2 <- plyr::revalue(name.df$Condition, condition.pairwise.vec.short)
+name.df$lineage_Condition_2 <- paste0(name.df$lineage, " ", name.df$Condition_2)
+# subset name.df
+name.df <- name.df[name.df$ct_condition %in% colnames(df), ]
+name.vec <- setNames(name.df$lineage_Condition_2, nm = name.df$ct_condition)
+
+min_set_size = 1
+font_size = 6
+# Plot
+plt <- ComplexUpset::upset(df, names(df), 
+                           min_size = min_set_size,
+                           set_sizes = FALSE, 
+                           labeller = ggplot2::as_labeller(name.vec), 
+                           name = NULL, 
+                           height_ratio=0.8,
+                           matrix=( intersection_matrix(geom=geom_point(size=1))), 
+                           
+                    base_annotations = list(
+                      # Barplot
+                      'N response TU-QTL' = intersection_size( fill = "#778da9",
+                                                            text = list(size = 5/.pt, angle=90, vjust = 0.5, hjust = -0.2),
+                                                            text_colors = c(on_background = "black",
+                                                                            on_bar = "black")) +
+                                      theme( panel.grid = element_blank(), axis.line = element_line(), 
+                                             axis.title.y = element_text(size = font_size, vjust = -25),
+                                             axis.text.y  = element_text(size = font_size))
+                      ),
+                    themes=upset_modify_themes(
+                      list(
+                        'intersection_size'=theme(text=element_text(size=font_size),
+                                                  plot.margin = margin(0, 0, 0, 0, unit = "cm")),
+                        'intersections_matrix'=theme(text=element_text(size=font_size),
+                                                     plot.margin = margin(0, 0, 0, 0, unit = "cm"))
+                        )), 
+queries=list(upset_query(set= "T.CD4_IAV.NS", color = "#355070", fill="#355070"), 
+             upset_query(set= "T.CD4_COV.NS", color = "#355070", fill="#355070"), 
+             # upset_query(set= "T.CD4.IAV.COV", fill="#355070"), 
+             upset_query(set= "T.CD8_IAV.NS", color = "#b56576", fill="#b56576"), 
+             upset_query(set= "T.CD8_COV.NS", color = "#b56576", fill="#b56576"),
+             # upset_query(set= "T.CD8_IAV.COV", color = "#b56576", fill="#b56576"),
+             upset_query(set= "MONO_IAV.NS", color = "#6d597a", fill="#6d597a"), 
+             upset_query(set= "MONO_COV.NS", color = "#6d597a", fill="#6d597a"),
+             # upset_query(set= "MONO_IAV.COV", color = "#6d597a", fill="#6d597a"), 
+             upset_query(set= "NK_IAV.NS", color = "#eaac8b", fill="#eaac8b"), 
+             upset_query(set= "NK_COV.NS", color = "#eaac8b", fill="#eaac8b"),
+             # upset_query(set= "NK.IAV.COV", fill="#eaac8b"), # no hits
+             upset_query(set= "B_IAV.NS", color = "#e56b6f", fill="#e56b6f"),
+             upset_query(set= "B_COV.NS", color = "#e56b6f", fill="#e56b6f")#,
+             #upset_query(set= "B.IAV.COV", fill="#e56b6f") # no hits
+             ))
+plt
+
+file.name<- paste0("02_Plots/03_celltype-fractions/05_01_responseTU-QTL-sharing-ComplexUpset-min-set-", min_set_size, "-QTLs.pdf")
+ggsave(file.name, plt, width = 10, height = 5, units = "cm")
+# file.name <- gsub(".pdf", ".svg", file.name)
+# ggsave(file.name, plt, width = 12, height = 6, units = "cm", bg = "white")
+```
+
+
+# Supp Fig. 22 Overlap reTU-QTLs with population DTU
+
+*Given we don't find reTU-QTL gene overlap with pop*infection interactions, let's try with standard popDTU*
+- popDRTU
+```{r}
+pop.l <-  readRDS("../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds")
+pop.l <- pop.l$lineage
+```
+
+- Re TU-QTLs data
+```{r}
+df <- readRDS( "01_Processed-Data/03_celltype-fractions/02_00_response-TU-QTLs-tested.rds" )
+# df$Condition <- plyr::revalue(df$Condition, c("IAV_NS" = "IAV", "COV_NS" = "COV"))
+df.l <- split(df, df$lineage)
+df.l <- lapply(df.l, function(x) split(x, x$Condition))
+```
+
+- Overlap
+```{r}
+lineages <- names(pop.l)
+conditions.pop <- names(pop.l$B)
+conditions.qlt <- names(df.l$B)
+
+overlap.l <- lapply(lineages, function(ct) lapply(conditions.pop, function(x)
+  lapply(conditions.qlt, function(y){
+  df.1 <- df.l[[ct]][[y]]
+  df.2 <- pop.l[[ct]][[x]]
+  
+  sig_1 <- unique(df.1[!is.na(df.1$fdr.infected) & df.1$fdr.infected < 0.01 & is.na(df.1$fdr.baseline ) & df.1$p_value.baseline > 0.01, "gene_name"])
+  # sig_1 <- unique(df.1[ df.1$fdr.infected < 0.01 & df.1$fdr.infected < df.1$fdr.baseline & df.1$MD.infected > df.1$MD.baseline, "gene_name"])
+  
+  # Explanation: here we select those snps which are significant at the FDR level in infected but didn't make it to the FDR level in Baseline (response TU-QTLs)
+  all_1 <- unique(df.1$gene_name)
+  sig_2 <- df.2[df.2$fdr < 0.05, "gene_name", drop = T] # population * infection TU interaction at FDR < 0.1
+  all_2 <- df.2[, "gene_name", drop = T] 
+  
+  df <- data.frame("shared" = length( intersect( sig_1, sig_2 )),
+                   "model.1.specific" = length( setdiff( sig_1, sig_2 )), # model specific but SIG
+                   "model.2.specific" = length( setdiff( sig_2, sig_1 )) )
+  # contingency table
+  cont.tab <- contingency.table.fun(sig_1, sig_2, all_1, all_2)
+  ## add contingency table values
+  df[["S12"]] <- cont.tab[1, 1] ; df[["S1_NS2"]] <- cont.tab[2, 1] ; df[["S2_NS1"]] <- cont.tab[1, 2] ; df[["NS12"]] <- cont.tab[2, 2]
+
+  # Fisher exact test
+  fisher_result <- fisher.test(cont.tab)
+  df[["p_value"]] <- fisher_result$p.value
+  df[["odds.ratio"]] <- fisher_result$estimate[["odds ratio"]]
+  df[["conf.int.lower"]] <- fisher_result$conf.int[1]
+  df[["conf.int.upper"]] <- fisher_result$conf.int[2]
+
+  return(df)
+  })))
+
+overlap.l <- lapply(overlap.l, function(ct) lapply(ct, function(x) setNames(x, conditions.qlt)))
+overlap.l <- lapply(overlap.l, function(ct) setNames(ct, conditions.pop))
+overlap.l <- setNames(overlap.l, lineages)
+
+# Merge
+overlap.l <- lapply(overlap.l, function(ct) lapply(ct, function(x) plyr::ldply(x, .id = "Condition.QTL")))
+overlap.l <- lapply(overlap.l, function(ct) plyr::ldply(ct, .id = "Condition.POP"))
+overlap.df <- plyr::ldply(overlap.l, .id = "lineage")
+overlap.df$fdr <- p.adjust(overlap.df$p_value)
+overlap.df <- add.p_value.label(df = overlap.df, p_value.col="fdr")
+
+overlap.df[overlap.df$fdr < 0.05, ]
+overlap.df[overlap.df$Condition.POP == "NS", ]
+
+# Plot
+df = reshape2::melt(overlap.df[, c("lineage", "Condition.POP", "Condition.QTL",  "shared", "model.1.specific", "model.2.specific", "p_value_label")])
+df$variable <- plyr::revalue(df$variable, c("model.1.specific" = "response TU-QTL", "model.2.specific" = "Population DTU"))
+df$lineage <- factor(df$lineage, levels = rev(lineage.df$lineage))
+
+df$Condition.POP <- factor(df$Condition.POP, levels = names(condition.vec.short))
+df$Condition.POP <- plyr::revalue(df$Condition.POP, condition.vec.short)
+df$Condition.QTL <- factor(df$Condition.QTL, levels = c("IAV_NS", "COV_NS"))
+df$Condition.QTL <- plyr::revalue(df$Condition.QTL, c("IAV_NS" = "IAV-Baseline", "COV_NS" = "COV-Baseline"))
+
+df <- df %>% group_by(lineage, Condition.POP, Condition.QTL) %>% mutate(value_rel = value/sum(value))
+# Label df
+label.df <- df %>% mutate(x = sum(value), x_rel = 1.02) %>% distinct(Condition.POP, Condition.QTL, p_value_label, x, x_rel) 
+label.df[label.df$p_value_label == "ns", "p_value_label"] <- NA # replace "ns" with NA
+label.df[!is.na(label.df$p_value_label), "p_value_label"] <- "*" # no need for multiplt "***" here
+color.vec <- c("shared" = "#f2cc8f", "response TU-QTL" = "#81b29a", "Population DTU" = "#e07a5f")
+
+# Plot 
+plt <- ggplot(data = df, aes(y = lineage, x = value)) +
+  geom_bar(aes( fill = variable), stat = "identity", linewidth=0.25, position = position_stack(reverse = T)) +
+  geom_text(data = df[df$value > 0, ], aes(x = value, label = value), color = "black",  size = 5/.pt, hjust = 0.5, 
+            position = position_stack(vjust = .5)) +
+  # significance label
+  geom_text(data = label.df, aes(x = x, y = lineage, label = p_value_label), color = "black",  size = 7/.pt, hjust = 0, vjust = 0.75) +
+  facet_grid(Condition.POP ~ Condition.QTL, switch = "y") +
+  scale_fill_manual("", values = color.vec ) +
+  # scale_color_manual( values = lineage.color.vec ) +
+  # scale_alpha_manual("", values = c(0.5, 1)) +
+  xlab("N genes") + ylab("Population DTU") + 
+  plot_theme + 
+  guides( color = FALSE )
+plt
+
+file.name <- "02_Plots/03_celltype-fractions/04_06_response-TU-QTL-sharing-with-popDTU-01_absolute.pdf"
+ggsave(file.name, plt, width =10.5, height = 7.5, units = "cm")
+```
+
+
+# Lineage sharing 
+
+```{r}
+df  <- readRDS("01_Processed-Data/03_celltype-fractions/02_00_response-TU-QTLs-tested.rds")
+df$geneId_snpId <- paste0(df$geneId, "_", df$snpId)
+# Split by Condition and lineage
+df.l <- split(df, df$Condition)
+df.l <- lapply(df.l, function(x) split(x, x$lineage))
+# Subset to variatnts tested in all lineages
+df.l <- lapply(df.l, function(c){
+  vec = Reduce(intersect, lapply(c, function(x) x$geneId_snpId))
+  print(length(vec))
+  lapply(c, function(x) x[x$geneId_snpId %in% vec, ])
+  })
+df.l <- lapply(df.l, function(c) plyr::ldply(c, .id = "lineage"))
+df <- plyr::ldply(df.l, .id = "Condition")
+# Keep response QTLs
+df <- df[!is.na(df$fdr.infected) & df$fdr.infected < 0.01 & is.na(df$fdr.baseline ) & df$p_value.baseline > 0.01, ] # Explanation: here we select those snps which are significant at the FDR level in infected but didn't make it to the FDR level in Baseline (response TU-QTLs)
+# Count number of re-TU-QTLs and N of genes
+# length(unique())
+
+# Count sharing
+df <- df %>% group_by(Condition, geneId_snpId) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(Condition,  n_lineages) %>% summarise(n_qtls = n_distinct(geneId_snpId))
+df <- df %>% group_by(Condition) %>% mutate(n_qtls_rel = n_qtls / sum(n_qtls) )
+```
+

@@ -1,0 +1,135 @@
+---
+title: "01_DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal
+
+*Supplementary Fig. 18.* Sharing of population differential transcript usage (DTU) genes with and without a transcript usage quantitative trait loci (TU-QTL) across immune lineages and conditions.
+- a) Proportion of population DTU genes with and without a TU-QTL shared across immune lineages within each condition.
+- b) Proportion of population DTU genes with and without a TU-QTL detected in each condition combination within each immune lineage. A common set of tested population DTU genes across immune lineages and conditions is considered across the different plots. 
+
+
+- Load functions
+```{r}
+source("../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../01_Randolph2021/05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../06_sQTL/03_DA/")
+```
+
+# Supp Fig. 18. A
+
+
+*Supplementary Fig. 18.* a) Proportion of population DTU genes with and without a TU-QTL shared across immune lineages within each condition.
+
+```{r}
+file.name <- "../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu.l <- dtu.l$lineage
+
+dtu.l <- list(
+  NS = lapply(dtu.l, function(x) x[["NS"]]), 
+  IAV = lapply(dtu.l, function(x) x[["IAV"]]), 
+  COV = lapply(dtu.l, function(x) x[["COV"]])
+)
+
+dtu.l <- lapply(dtu.l, function(c){
+  vec = Reduce(intersect, lapply(c, function(x) x$gene_name))
+  lapply(c, function(x) x[x$gene_name %in% vec, ])
+  })
+dtu.l <- lapply(dtu.l, function(c) plyr::ldply(c, .id = "lineage"))
+dtu <- plyr::ldply(dtu.l, .id = "Condition")
+dtu <- dtu[dtu$fdr < 0.05, ] # keep DTU
+
+## Merge with QTLs
+qtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+qtl$is.QTL <- "TRUE"
+qtl <- unique(qtl[, c("lineage", "Condition", "gene_name", "is.QTL")])
+dtu <- merge(dtu, qtl, by = c("lineage", "Condition", "gene_name"), all.x = T, all.y = F)
+dtu[is.na(dtu$is.QTL), "is.QTL"] <- "FALSE"
+dtu$is.QTL <- plyr::revalue(dtu$is.QTL, c("TRUE" = "popDTU with TU-QTL", "FALSE" = "popDTU without TU-QTL"))
+
+# Count sharing
+df <- dtu %>% group_by(Condition, is.QTL, gene_name) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(Condition, is.QTL, n_lineages) %>% summarise(n_genes = n_distinct(gene_name))
+df <- df %>% group_by(Condition, is.QTL) %>% mutate(n_genes_rel = n_genes / sum(n_genes) )
+
+df$n_lineages <- factor(df$n_lineages, levels = c(1:5))
+df$Condition <- factor(df$Condition, levels = rev(names(condition.vec.short)))
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+
+plt <- ggplot(df, aes(x = n_genes_rel, y = Condition, fill = n_lineages)) + 
+  geom_bar(stat = "identity", color = "black", linewidth = 0.25, position = position_stack(reverse = T)) + 
+   geom_text(data = df[df$n_lineages %in% c("1", "2", "3"), ],  aes(label = round(n_genes_rel, 2)), 
+             position = position_stack(vjust = 0.5, reverse = T), color="black", size=3.5/.pt, angle = 90) + 
+  scale_fill_brewer("N lineages", palette = "Blues") + 
+  xlab("% of population DTU Genes") + 
+  facet_grid(  ~is.QTL, switch = "y") +
+  plot_theme + 
+  theme(axis.title.y = element_blank(), 
+        legend.box.spacing = unit(0.2, "cm"), legend.key.size = unit(0.2, "cm"),
+        legend.title = element_text(size = 5, margin = margin(b = 0, unit = "cm"))
+        )+ 
+  guides(fill = guide_legend(byrow = FALSE, override.aes = list(color = "white", linewidth = 0.15)))
+
+file.name <- "02_Plots/03_celltype-fractions/03_04_02_popDTU-lineage-sharing-with-or-without-QTL.pdf"
+ggsave(file.name, plt, width = 10.5, height =5, units = "cm")
+```
+
+# Supp Fig. 18. B
+
+*Supplementary Fig. 18.* b) Proportion of population DTU genes with and without a TU-QTL detected in each condition combination within each immune lineage. A common set of tested population DTU genes across immune lineages and conditions is considered across the different plots. 
+
+```{r}
+file.name <- "../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu.l <- dtu.l$lineage
+
+dtu.l <- lapply(dtu.l, function(ct){
+  vec = Reduce(intersect, lapply(ct, function(x) x$gene_name))
+  lapply(ct, function(x) x[x$gene_name %in% vec, ])
+  })
+dtu.l <- lapply(dtu.l, function(ct) plyr::ldply(ct, .id = "Condition"))
+dtu <- plyr::ldply(dtu.l, .id = "lineage")
+dtu <- dtu[dtu$fdr < 0.05, ] # keep DTU
+
+## Merge with QTLs
+qtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+qtl$is.QTL <- "TRUE"
+qtl <- unique(qtl[, c("lineage", "Condition", "gene_name", "is.QTL")])
+dtu <- merge(dtu, qtl, by = c("lineage", "Condition", "gene_name"), all.x = T, all.y = F)
+dtu[is.na(dtu$is.QTL), "is.QTL"] <- "FALSE"
+dtu$is.QTL <- plyr::revalue(dtu$is.QTL, c("TRUE" = "popDTU with TU-QTL", "FALSE" = "popDTU without TU-QTL"))
+
+df <- dtu %>% group_by(lineage, is.QTL, gene_name) %>% summarise(n_conditions = n_distinct(Condition), Condition = paste(Condition, collapse = ","))
+df <- df %>% group_by(lineage, is.QTL, Condition) %>% summarise(n_genes = n_distinct(gene_name))
+df <- df %>% group_by(lineage, is.QTL) %>% mutate(n_genes_rel = n_genes /sum(n_genes))
+
+df$Condition <- plyr::revalue(df$Condition, c("NS" = "Baseline", 
+                                              "COV,NS" = "Baseline,COV", "IAV,NS" = "Baseline,IAV", 
+                                              "COV,IAV" = "IAV,COV", "COV,IAV,NS" = "All"))
+
+df$Condition <- factor(df$Condition, levels = c("Baseline", "IAV", "COV","Baseline,IAV","Baseline,COV", 
+                                                "IAV,COV", "All"))
+df$lineage <- factor(df$lineage, levels = rev(lineage.df$lineage))
+color.vec <- c("Baseline" = "#edf2f4", "IAV" = "#75A9D1", "COV" = "#c1121f", 
+               "Baseline,COV" = "#780000", "Baseline,IAV" = "#003049", 
+               "IAV,COV" = "#ffb41f", "All" = "#fdf0d5")
+
+plt <- ggplot(df, aes(y = lineage, x = n_genes_rel, fill = Condition)) + 
+  geom_bar(width=0.8, stat = "identity", #color = "white", 
+           linewidth = 0.25, position = position_stack(reverse = T)) + 
+  geom_text(aes(label = round(n_genes_rel, 2)), position = position_stack(vjust = 0.5, reverse = T),
+            color="black", alpha = 1, size=3/.pt, angle = 90) +
+  scale_fill_manual(values = color.vec ) +
+  xlab("% of Population DTU Genes") + 
+  facet_grid(   ~is.QTL , scales = "free_x", switch = "y") +
+  plot_theme  + theme(axis.title.y = element_blank(), axis.line.y = element_blank())
+plt
+
+file.name <- "02_Plots/03_celltype-fractions/03_04_03_popDTU-Condition-sharing-with-or-without-QTL.pdf"
+ggsave(file.name, plt, width = 10.5, height = 5, units = "cm")
+```

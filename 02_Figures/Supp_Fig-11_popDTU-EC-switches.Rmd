@@ -1,0 +1,91 @@
+---
+title: "03_DTU-Viz"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## 0. Goal 
+
+*Supplementary Fig. 11.* Proportion of population-level differential transcript usage (DTU) genes that show a switch in the dominant equivalence class (EC) between populations. Percentage of population DTU genes with a switch in their mean most abundant EC between individuals of European and African populations. EC switches are further stratified between those genes where the switching ECs map to non-overlapping sets of transcripts (Iso swtich; e.g. EC1 maps to t1 and EC2 maps to t2,t3), and those that map to overlapping sets of transcripts (No iso switch; e.g EC1 maps to t1 and EC2 maps to t1,t2).
+ 
+- Load data 
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/")
+```
+
+
+## Supp. Fig. 11.
+
+- Get numbers in the paper
+```{r}
+file.name <- "01_Processed-Data/06_celltype-fractions/01_popDTU-filtered-df.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu$is.EC.switch <- as.logical(dtu$is.EC.switch)
+# N of EC switches 
+df <- dtu %>% group_by(is.EC.switch) %>% summarise(n_genes = n())
+df <- df %>% mutate(n_genes_rel = n_genes/ sum(n_genes))
+
+#  N of Tx switches among EC switches
+df <- dtu %>% group_by(Condition, celltype) %>% summarise(ec_switch = sum(is.EC.switch == TRUE),
+                                                          tx_switch = sum(is.transcript.switch == TRUE),  
+                                                          n_dtu = n())
+df$ec_switch_rel <- df$ec_switch / df$n_dtu
+df$tx_switch_rel_over_ec <- df$tx_switch / df$ec_switch  
+```
+
+- Plot *How many of the EC switches involve ECs that of non overlapping transcripts? E.g t1 vs t1,t2 would overlap, t1 vs t2 would not*
+```{r}
+file.name <- "01_Processed-Data/06_celltype-fractions/01_popDTU-filtered-df.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu$is.EC.switch <- as.logical(dtu$is.EC.switch)
+#  N of Tx switches among EC switches
+df <- dtu[dtu$is.EC.switch, ] %>% group_by(Condition, celltype, is.EC.switch, is.transcript.switch) %>% summarise(n_ec_switch = n_distinct(gene_id), .groups = "drop")
+dtu.df <- dtu %>% group_by(Condition, celltype) %>% summarise(total_dtu = n_distinct(gene_id), .groups = "drop")
+# merge 
+df <- merge(df, dtu.df, by = c("Condition", "celltype"))
+df$n_ec_switch_rel <- df$n_ec_switch / df$total_dtu
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+df$celltype <- factor(df$celltype, levels = rev(lineage.df$lineage))
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+model <- "rel_abundances ~ Intercept + Run + Age + POP"
+iso.switch.vec <- c("TRUE" = "Iso switch", "FALSE" = "No Iso switch" )
+# Plot 
+tit <- "popDTU Aquino 2023"
+sub_tit <- paste( model , " | FDR < 0.05")
+x_lab <- "% Population DTU genes with EC switch"
+y_lab <- "Cell type"
+
+# Plot 
+plt <- ggplot(data = df, aes(x = n_ec_switch_rel, y = celltype, fill = celltype, alpha = is.transcript.switch)) +
+  geom_bar(aes(group = is.transcript.switch), stat= "identity", linewidth=0.25, position = position_stack(reverse = T), color = "white") + 
+  scale_alpha_manual("", values = c(0.8, 1), labels = iso.switch.vec) +
+  geom_text(data = df, aes(x = n_ec_switch_rel, label = n_ec_switch, group = is.transcript.switch), 
+            color = "black", alpha = 1,  # Labels
+            size = 3.5/.pt, hjust = 0.5, position = position_stack(vjust = .5, reverse = T)) +
+  facet_grid(Condition ~ ., switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_color_manual("Condition", values = condition.color.vec, drop = F) +
+  labs(title = tit, subtitle = sub_tit) + xlab(x_lab) + ylab(y_lab) + 
+  plot_theme + 
+  theme(axis.title.y = element_blank(), axis.title.x = element_text(hjust = 1),
+        legend.position="bottom", legend.box="horizontal", 
+        legend.box.spacing = unit(0, "cm"),
+        legend.box.margin = margin(0, 0, 0, 0, unit = "cm"),
+        plot.margin = unit(c(0.1, 0.1, 0, 0.1), "cm"),
+        legend.spacing.y = unit(0, "cm"), 
+        legend.key.spacing.x = unit(0, "cm")) + 
+  guides(fill = FALSE, color = FALSE, 
+          alpha=guide_legend( override.aes = list(label = "", size = 1, ncol=1), reverse = F)) 
+plt
+# Save
+file.name <- "02_Plots/06_celltype-fractions/01_07_02_popDTU-N-DTU-EC-switch-Transcript-switch.pdf"
+ggsave(file.name, plt, width = 4, height = 5.5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 4, height = 5.5, units = "cm", bg = "white")
+```

@@ -1,0 +1,82 @@
+---
+title: "N-iso-gene"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0 Goal 
+
+- Plotting Supplementary Fig. 2. A where we sxamine the nCount vs nFeature distribution for equivalence classes (ECs) and genes. 
+
+# 0. Load functions
+```{r}
+source("../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../04_EC-charac/07_nCount-nFeature/")
+```
+
+# 1. Calculate n_Count and n_Feature expressed 
+
+*For each Equivalence class (EC) x cells object of each immune lineage (e.g. CD4+ T, CD8+ T, monocytes, NK, and B cells) which included cells from baseline, influenza A virus (IAV), and SARS-CoV-2 (COV)* 
+
+*The same calculation was performed for the genes x cell object, displaying the same patter as for ECs, but only the nCount and nFeature EC values were finally plotted in Supplementary Fig. 2A*
+
+```{r}
+g <- read.RDS.files("../../02_Processing/03_Merge-split-cts/01_tcc/01_lineage/", pattern = "ECs-EUB-AFB.rds")
+g <- lapply(g, function(seu){ # Recalculate nFeature and nCount
+  meta = seu@meta.data
+  mat = seu@assays$RNA@layers$counts
+  n_count <- colSums(mat)
+  mat@x[] <- 1 # replace all non zero values with 1 to calculate N feature
+  n_feature <- colSums(mat)
+  meta$nCount_RNA_post_fitler <- n_count
+  meta$nFeature_RNA_post_fitler <- n_feature
+  meta
+})
+g <- data.table::rbindlist(g)
+saveRDS(g, "01_Processed-Data/01_Aquino-all-cells-metadata-01_ECs.rds")
+# # Merge genes + ECs
+# g <- readRDS("01_Processed-Data/01_Aquino-all-cells-metadata-01_genes.rds")
+# e <- readRDS("01_Processed-Data/01_Aquino-all-cells-metadata-01_ECs.rds")
+# meta <- plyr::ldply(list("gene" = g, "ecs" = e), .id = "class")
+```
+
+
+# 2. Plots
+
+## 2.2 Boxplot By Condition
+
+```{r}
+# Merge genes + ECs
+g <- readRDS("01_Processed-Data/01_Aquino-all-cells-metadata-01_genes.rds")
+e <- readRDS("01_Processed-Data/01_Aquino-all-cells-metadata-01_ECs.rds")
+meta <- plyr::ldply(list("gene" = g, "ecs" = e), .id = "class")
+
+# process 
+df <- meta %>% group_by(class, lineage, Condition) %>% summarise( mean_x = mean(nCount_RNA), mean_y = mean(nFeature_RNA), sd_x = sd(nCount_RNA), sd_y = sd(nFeature_RNA))
+
+df$Condition <- factor(df$Condition, levels = names(condition.vec) )
+df$Condition <- plyr::revalue(df$Condition, c("NS" = "Baseline")) # keep naming as: "Baseline"; "IAV"; "COV"
+condition.color.vec <- c("Baseline" = "#969696", "IAV" = "#75A9D1", "COV" = "#c1121f")
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$lineage <- factor(df$lineage, levels = names(color.vec))
+df$class <- factor(df$class, levels = c("gene", "ecs"))
+# Only ECs
+df <- df[df$class == "ecs", ]
+
+plt <- ggplot(df, aes(x = mean_x, y = mean_y, color = Condition)) + 
+  geom_point(size = 3/.pt) + 
+  geom_errorbar(aes(ymin = mean_y - sd_y, ymax = mean_y + sd_y), size = 0.25) +
+  geom_errorbarh(aes(xmin = mean_x - sd_x, xmax = mean_x + sd_x), size =  0.25) +
+  scale_color_manual("", values = condition.color.vec ) +
+  facet_grid( ~ lineage, scales = "free") + 
+  xlab("UMI count") + ylab("EC count") + 
+  labs(title = "Aquino All cells") + 
+  plot_theme + theme(plot.title = element_blank(), #element_text(size = 8), 
+                     axis.text.x = element_text(angle=30, hjust = 1, vjust = 1))
+plt
+
+file.name <- "02_Plots/02_nCount-nFeature-EC-genes-All-cells-boxplot-only-ECs.pdf"
+ggsave(file.name, plot = plt, width = 10, height = 5, units = "cm")
+```

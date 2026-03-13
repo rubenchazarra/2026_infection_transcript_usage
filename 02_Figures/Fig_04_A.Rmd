@@ -1,0 +1,86 @@
+---
+title: "Infection x population DTU interaction"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## 0. Goal 
+
+*Figure 4. A*
+a) Number of significant population × infection transcript usage (TU) interactions detected  (FDR<0.1), shown with and without adjustment for interindividual differences in cell composition.
+
+
+- Load functions Functions
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/03_interactionDTU/02_DA/")
+```
+
+
+# Figure 4.A
+
+*Compare interaction DTU adjusting and no adjusting for cell type fractions*
+```{r}
+# 1. No adjusting
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_interactionDTU-filtered-df-fdr-0.1.rds"
+dtu.1 <- readRDS(file.name)$lineage
+# 2. Adjusting
+file.name <- "01_Processed-Data/06_celltype-fractions/01_interactionDTU-filtered-df-fdr-0.1.rds"
+dtu.2 <- readRDS(file.name)$lineage
+
+of.interest <- c("celltype", "Condition", "gene_name", "fdr")
+dtu.1 <- dtu.1[ dtu.1$Condition %in% c("IAV.NS", "COV.NS"), of.interest ]
+dtu.2 <- dtu.2[ dtu.2$Condition %in% c("IAV.NS", "COV.NS"), of.interest ]
+
+dtu.1$Not_Adjusted <- T
+dtu.2$Adjusted <-  T # "Adjusted"
+
+df <- merge(dtu.1, dtu.2, by = c("celltype", "Condition", "gene_name"), all = T)
+df[is.na(df)] <- F
+
+table(df$Not_Adjusted, df$Adjusted)
+df[df$Not_Adjusted & df$Adjusted, ]
+```
+
+- Plot numbers irrespective they are the same genes
+```{r}
+dtu1 <- readRDS("01_Processed-Data/05_Filt-1-5-0.8-0.01/01_interactionDTU-filtered-df-fdr-0.1.rds")
+dtu2 <- readRDS("01_Processed-Data/06_celltype-fractions/01_interactionDTU-filtered-df-fdr-0.1.rds")
+
+dtu1 <- dtu1$lineage %>% group_by(celltype, Condition) %>% summarise(n_genes = n_distinct(gene_id))
+dtu2 <- dtu2$lineage %>% group_by(celltype, Condition) %>% summarise(n_genes = n_distinct(gene_id))
+
+df <- merge(dtu1, dtu2, by = c("celltype", "Condition"), all = T)
+names(df)[ match(c("n_genes.x", "n_genes.y"), names(df))] <- c("Not Adjusted", "Adjusted")
+df <- df[df$Condition %in% c("IAV.NS", "COV.NS"), ]
+
+df <- reshape2::melt(df, value.name = "n_genes", variable.name = "class")
+df$class <- factor(df$class, levels = rev(c("Adjusted", "Not Adjusted")))
+
+df$Condition <- factor(df$Condition, levels = names(condition.pairwise.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+df$lineage <- df$celltype
+df$lineage <- factor(df$lineage, levels = rev(lineage.df$lineage))
+
+# Plot 
+x_lab <- "N Infection * Population DTU genes"
+plt <- ggplot(data = df, aes(y = lineage, x = n_genes, fill = lineage, alpha = class)) +
+  geom_bar(stat = "identity", linewidth=0.25, position = position_dodge2(reverse = TRUE)) +
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_alpha_manual("Cell composition", values = c(0.5, 1)) +
+  xlab(x_lab) + ylab("y_lab") + 
+  plot_theme + theme(axis.title.y = element_blank(), axis.title.x = element_text(hjust = 2), 
+                     legend.position = "bottom") + 
+  guides(fill = FALSE,  color = FALSE )
+plt
+
+# Save
+file.name <- "02_Plots/06_celltype-fractions/01_01_interactDTU-N-DTU-01_lineage-Adjusted-vs-No-fdr-0.1.pdf"
+ggsave(file.name, plt, width = 4.5, height = 5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 4.5, height = 5, units = "cm", bg = "white")
+```
+

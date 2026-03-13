@@ -1,0 +1,848 @@
+---
+title: "sQTL-Overlaps"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+# 0. Goal 
+Overlap our sQTLs and sGenes with those from: 
+- Rotival et al., 2019
+- Garrido-Martín et al., 2021
+- Tian et al., 2024
+
+*Supplementary Fig. 16. Comparison of the identification of transcript usage quantitative trait loci (TU-QTLs) and associated genes with previous studies.*
+- a) Overlap between monocyte TU-QTL genes identified in this study and those reported in a bulk RNA-seq study of monocytes5. Baseline TU-QTL genes were compared with baseline genes, while influenza A (IAV) and SARS-CoV-2-associated TU-QTL genes were compared with IAV-associated genes. The dotted line indicates no enrichment (odds ratio = 1).  Asterisks denote significance levels: * p < 0.01, ** p < 0.001, etc (Fisher’s exact test). 
+- b) Overlap between TU-QTLs and TU-QTL genes detected in this study and those reported in bulk RNA-seq whole blood and EBV-transformed lymphocytes6 
+- c) Overlap between baseline TU-QTL genes  from this study and those detected in a 5’ single-cell study of TU-QTL across Asian populations in immune cells at baseline7.
+
+- Load functions 
+```{r}
+source("../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../01_Randolph2021/05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../06_sQTL/03_DA/")
+suppressPackageStartupMessages(require(readxl))
+```
+
+# 1. Rotival 2019 (Supplementary Fig. 16.A)
+
+## 1.1 Tested sGenes 
+
+This data is in Supp Data 2, sheet 1. This data contains the tested AS events in infection differential splicing analysis, by the  tested AS events are the same across the paper
+
+```{r}
+file.name <- "../../../00_Bibliography/2019-Rotival-Nat_splicing-response-to-infection-Supp/2019-Rotival-Nat_splicing-response-to-infection-SupplementaryData_2.xlsx"
+tested <- read_excel(file.name, sheet = 1, skip = 13)
+str(tested)
+
+tested <- tested[, c(1:4) ]
+names(tested) <- c("AS.event.ID", "gene_id", "gene_name", "event_type")
+```
+
+## 1.2 Detected sQTLs
+
+This data is in Supp Data 3, sheet 1. Unfortunately, *only the detected sQTLs, not all the tested*. Hence, with Rotival et al., 2019 supplementary data we can only overlap the sGenes. 
+
+```{r}
+file.name <- "../../../00_Bibliography/2019-Rotival-Nat_splicing-response-to-infection-Supp/2019-Rotival-Nat_splicing-response-to-infection-SupplementaryData_3.xlsx"
+sqtl <- read_excel(file.name, sheet = 1, skip = 19)
+
+sqtl <- sqtl %>% dplyr::select( -...10, -...16, -...19, -...35, -...40 ) # remove empty columns
+# rename columns
+names(sqtl) <- c("AS.event.ID", "gene_name", "event_type", 
+                 "AS.NS","AS.LPS", "AS.Pam", "AS.R8", "AS.IAV", "is.Immune.gene", 
+                 "Condition.sQTL.most.sig", "sQTL.peak.SNP", "sQTL.peak.SNP.p.value", "sQTL.peak.SNP.position", "sQTL.peak.SNP.dist.from.ASE", 
+                 "DAF.AFB", "DAF.EUB", 
+                 "NS.p.value", "NS.sQTL.effect.size.beta", "NS.sQTL.effect.size.R2",
+                 "LPS.p.value", "LPS.sQTL.effect.size.beta", "LPS.sQTL.effect.size.R2",
+                 "Pam.p.value", "Pam.sQTL.effect.size.beta", "Pam.sQTL.effect.size.R2",
+                 "R8.p.value", "R8.sQTL.effect.size.beta", "R8.sQTL.effect.size.R2",
+                 "IAV.p.value", "IAV.sQTL.effect.size.beta", "IAV.sQTL.effect.size.R2", 
+                 "Predicted.effect.on.splicing", "Splice.regulatory.element", "Overlap.motif.RBP", "Overlap.reg.element", "Coding.Seq")
+
+# Remove unwanted cols
+# We want to overlap our baseline sQTLs vs Rotival baseline sQTLs, and our COV and IAV sQTLs vs Rotival IAV sQTLs
+rm.cols <- c( "AS.NS","AS.LPS", "AS.Pam", "AS.R8", "AS.IAV", "is.Immune.gene",
+              "Condition.sQTL.most.sig", "sQTL.peak.SNP", "sQTL.peak.SNP.p.value", "sQTL.peak.SNP.position", "sQTL.peak.SNP.dist.from.ASE",
+              "DAF.AFB", "DAF.EUB", 
+              "NS.sQTL.effect.size.beta", "NS.sQTL.effect.size.R2", # NS
+              "LPS.p.value", "LPS.sQTL.effect.size.beta", "LPS.sQTL.effect.size.R2", # LPS
+              "Pam.p.value", "Pam.sQTL.effect.size.beta", "Pam.sQTL.effect.size.R2", # Pam
+              "R8.p.value", "R8.sQTL.effect.size.beta", "R8.sQTL.effect.size.R2", # R8
+              "IAV.sQTL.effect.size.beta", "IAV.sQTL.effect.size.R2", # IAV
+              "Predicted.effect.on.splicing", "Splice.regulatory.element", "Overlap.motif.RBP", "Overlap.reg.element", "Coding.Seq" )
+
+sqtl <- sqtl [ , - match(rm.cols, colnames(sqtl)) ]
+
+# Merge with tested
+df <- merge(tested, sqtl, by = c("AS.event.ID", "gene_name", "event_type"), all = T)
+# P values > 0.05 are labelled with NA, replace with numeric value
+df$NS.p.value <- as.numeric(df$NS.p.value)
+df$IAV.p.value <- as.numeric(df$IAV.p.value)
+df$NS.p.value [ is.na(df$NS.p.value) ] <- 1
+df$IAV.p.value [ is.na(df$IAV.p.value) ] <- 1
+
+# Collapse NS and IAV
+df <- reshape2::melt(df, id.vars = c("AS.event.ID", "gene_id", "gene_name", "event_type"), variable.name = "Condition", value.name= "p.value")
+df$Condition <- plyr::revalue(df$Condition, c("NS.p.value" = "NS", "IAV.p.value"="IAV"))
+# Select most significant per gene. There may be >1 AS event per gene, keep the most significant 
+df <- df %>% group_by(Condition, gene_id) %>% slice(which.min(p.value))
+# save 
+saveRDS(df, "06_Overlaps/01_Processed-Data/01_Rotival2019-tested-sGenes-NS-IAV.rds")
+```
+
+## 1.3 Our sQTLs
+```{r}
+# Get Tested
+df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-df.rds")
+of.interest <- c("lineage", "Condition", "geneId", "gene_name", "snpId", "pv", "md")
+df <- df[, of.interest]
+
+# Add Significant FDR which in only in the 2nd sQTLseekeR2 file
+sqtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+of.interest <- c("lineage", "Condition", "geneId", "gene_name", "snpId", "fdr")
+sqtl <- sqtl[ , of.interest]
+df <- merge(df, sqtl, by= c("lineage", "Condition", "geneId", "gene_name", "snpId"), all= T)
+df$fdr[is.na(df$fdr)] <- 1
+saveRDS(df, "06_Overlaps/01_Processed-Data/00_Ruben2025-sQTLs.rds")
+```
+
+## 1.4 Compare
+```{r}
+# Our sQTLs
+ruben <- readRDS( "06_Overlaps/01_Processed-Data/00_Ruben2025-sQTLs.rds")
+ruben <- ruben %>% filter(lineage == "MONO") 
+# Keep one QTL per gene, we are overlapping sGenes
+ruben <- ruben %>% group_by( lineage, Condition, geneId ) %>% slice(which.min(pv))
+# Split by Condition
+df1.l <- split(ruben, f = ruben$Condition)
+
+# Rotival2019
+rotival <- readRDS("06_Overlaps/01_Processed-Data/01_Rotival2019-tested-sGenes-NS-IAV.rds")
+## add fdr
+rotival$fdr <- p.adjust(rotival$p.value)
+# Split by Condition
+df2.l <- split(rotival, f = rotival$Condition)
+
+# Compute overlap of sGenes
+## Baseline vs Baseline
+ns <- test.overlap.pro( m1 = df1.l$NS, m2 = df2.l$NS, fdr.col.1 = "fdr", fdr.col.2 = "fdr", fdr.thres.1 = 0.01, fdr.thres.2 = 0.05, 
+                           gene.col.1 = "gene_name", gene.col.2 = "gene_name" ) 
+## IAV vs IAV
+iav <- test.overlap.pro( m1 = df1.l$IAV, m2 = df2.l$IAV, fdr.col.1 = "fdr", fdr.col.2 = "fdr", fdr.thres.1 = 0.01, fdr.thres.2 = 0.05, 
+                           gene.col.1 = "gene_name", gene.col.2 = "gene_name" ) 
+## IAV vs COV
+cov <- test.overlap.pro( m1 = df1.l$COV, m2 = df2.l$IAV, fdr.col.1 = "fdr", fdr.col.2 = "fdr", fdr.thres.1 = 0.01, fdr.thres.2 = 0.05, 
+                           gene.col.1 = "gene_name", gene.col.2 = "gene_name" ) 
+# Pack to list 
+df <- plyr::ldply( list("Baseline" = ns, "IAV" = iav, "COV" = cov), .id = "Condition")
+df <- add.p_value.label( df )
+```
+
+## 1.5 Plot
+```{r}
+df$Condition <- factor(df$Condition, levels = rev(c("Baseline", "IAV", "COV")))
+# Plot
+plt <- ggplot(data = df, aes(x = odds.ratio, y = Condition)) + 
+  xlim(0, 8) + 
+  geom_point(size = 1, color = "#6d597a") + 
+  geom_text(aes(x = odds.ratio, y = Condition, label = p_value_label), color = "black", vjust = -0.5, size = 3.5/.pt) + 
+  geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed", linewidth=0.25) +
+  geom_errorbarh(aes(xmax = conf.int.upper, xmin = conf.int.lower), size = .5, height = .2, linewidth=0.25, color = "#6d597a") + 
+  labs(title = "tit", subtitle = "sub_tit") + ylab("y_lab") + xlab("Odds Ratio") + 
+  plot_theme + theme(axis.title.y = element_blank())
+
+# Save 
+file.name <- "06_Overlaps/02_Plots/03_celltype-fractions/01_Overlap-sGenes-Rotival2019-01_OR.pdf"
+ggsave(file.name, plt, width = 4, height = 2, units = "cm")
+```
+
+
+# 2. Garrido-Martin 2021 (Supplementary Fig. 16.B)
+
+*2025-10-23* I would repeat the processing
+## 2.1 Parse data
+
+**NOTE** Garrido-Martín et al. ( 2021 ) uses as `snpId` the format for variants
+used in GTEx. To match the ID format the following shell command has been used:
+
+`awk -vOFS="\t" 'FNR==NR{a[$1]=$2; next}{$2=a[$2]; print}' var2snp.tsv TISSUE/NOMINAL.FILE.tsv  > TISSUE/NOMINAL.FILE.MOD.tsv`
+`awk -vOFS="\t" 'FNR==NR{a[$1]=$2; next}{$14=a[$14]; print}' var2snp.tsv TISSUE/PERMUTED.FILE.tsv  > TISSUE/PERMUTED.FILE.MOD.tsv`
+
+The file `var2snp.tsv` can be found on the `./data/garrido-martin_2021/` 
+directory.
+
+### WholeBlood GTEx
+```{r SINGLE.merge Diego-wb results}
+col.sig <- c( "geneId", "variants.cis", "LD", "best.snp", "best.nominal.pv",
+              "shape1", "shape2", "nb.perm", "pv.emp", "pv.emp.beta",
+              "runtime", "fdr", "p_tn", "snpId", "F", "nb.groups", "md",
+              "tr.first", "tr.second", "info", "pv", "F.svQTL",	
+              "nb.perms.svQTL",	"pv.svQTL",	"fdr.svQTL" )
+
+col.all <- c( "geneId", "snpId", "F", "nb.groups", "md", "tr.first",
+              "tr.second", "info", "pv", "F.svQTL", "nb.perms.svQTL",
+              "pv.svQTL" )
+
+
+tbl.counts <- tibble::tibble( "Tested variants" = numeric(),
+                              "Tested genes" = numeric(),
+                              "sQTLs" = numeric(),
+                              "sGenes" = numeric() )
+
+all.tbl <-  read.table( "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/sQTLs.GTEx.V8.RSEM/Whole Blood/all-tests.nominal.MOD.tsv",
+                        header = TRUE, col.names = col.all, sep = "\t")
+
+sig.tbl <- read.table( "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/sQTLs.GTEx.V8.RSEM/Whole Blood/sqtls-0.05fdr.permuted.MOD.tsv",
+                        header = TRUE, col.names = col.sig, sep = "\t")
+
+tbl.counts <- tbl.counts %>%
+  tibble::add_row( 
+    tibble::as_tibble_row(
+      list( "Tested variants" = length(unique( all.tbl$snpId )),
+            "Tested genes" = length(unique( all.tbl$geneId )),
+            "sQTLs" = length(unique( sig.tbl$snpId )),
+            "sGenes" = length(unique( sig.tbl$geneId )))))
+
+all.tbl.gene <- all.tbl %>%
+        dplyr::select( geneId ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !geneId %in% sig.tbl$geneId )
+
+all.tbl.sqtl <- all.tbl %>%
+        dplyr::select( snpId ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !snpId %in% sig.tbl$snpId )
+
+tbl.garrido.gene <- sig.tbl %>%
+  dplyr::select( geneId, fdr ) %>%
+  dplyr::distinct() %>% 
+  dplyr::full_join( all.tbl.gene, by = c( "geneId", "fdr" ))
+
+tbl.garrido.sqtl <- sig.tbl %>%
+  dplyr::select( snpId, fdr ) %>%
+  dplyr::distinct() %>% 
+  dplyr::full_join( all.tbl.sqtl, by = c( "snpId", "fdr" ))
+
+
+write.table( tbl.garrido.sqtl, "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_whole-blood_sQTLs.tsv",
+             col.names = TRUE, row.names = FALSE, sep = "\t", quote = FALSE )
+
+write.table( tbl.garrido.gene, "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_whole-blood_sGenes.tsv",
+             col.names = TRUE, row.names = FALSE, sep = "\t", quote = FALSE )
+# 
+write.table( tbl.counts, "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_whole-blood_counts.tsv",
+             col.names = TRUE, row.names = FALSE, sep = "\t", quote = FALSE )
+```
+
+### EBV transformed lymphocytes GTEx
+```{r SINGLE.merge Diego-ebv results}
+col.sig <- c( "geneId", "variants.cis", "LD", "best.snp", "best.nominal.pv",
+              "shape1", "shape2", "nb.perm", "pv.emp", "pv.emp.beta",
+              "runtime", "fdr", "p_tn", "snpId", "F", "nb.groups", "md",
+              "tr.first", "tr.second", "info", "pv", "F.svQTL",	
+              "nb.perms.svQTL",	"pv.svQTL",	"fdr.svQTL" )
+
+col.all <- c( "geneId", "snpId", "F", "nb.groups", "md", "tr.first",
+              "tr.second", "info", "pv", "F.svQTL", "nb.perms.svQTL",
+              "pv.svQTL" )
+
+
+tbl.counts <- tibble::tibble( "Tested variants" = numeric(),
+                              "Tested genes" = numeric(),
+                              "sQTLs" = numeric(),
+                              "sGenes" = numeric() )
+
+all.tbl <-  read.table( "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/sQTLs.GTEx.V8.RSEM/Cells - EBV-transformed lymphocytes/all-tests.nominal.MOD.tsv",
+                        header = TRUE, col.names = col.all, sep = "\t")
+
+sig.tbl <- read.table( "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/sQTLs.GTEx.V8.RSEM/Cells - EBV-transformed lymphocytes/sqtls-0.05fdr.permuted.MOD.tsv",
+                        header = TRUE, col.names = col.sig, sep = "\t")
+    
+tbl.counts <- tbl.counts %>%
+  tibble::add_row( 
+    tibble::as_tibble_row(
+      list( "Tested variants" = length(unique( all.tbl$snpId )),
+            "Tested genes" = length(unique( all.tbl$geneId )),
+            "sQTLs" = length(unique( sig.tbl$snpId )),
+            "sGenes" = length(unique( sig.tbl$geneId )))))
+
+  
+all.tbl.gene <- all.tbl %>%
+        dplyr::select( geneId ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !geneId %in% sig.tbl$geneId )
+
+all.tbl.sqtl <- all.tbl %>%
+        dplyr::select( snpId ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !snpId %in% sig.tbl$snpId )
+
+tbl.garrido.gene <- sig.tbl %>%
+  dplyr::select( geneId, fdr ) %>%
+  dplyr::distinct() %>% 
+  dplyr::full_join( all.tbl.gene, by = c( "geneId", "fdr" ))
+
+tbl.garrido.sqtl <- sig.tbl %>%
+  dplyr::select( snpId, fdr ) %>%
+  dplyr::distinct() %>% 
+  dplyr::full_join( all.tbl.sqtl, by = c( "snpId", "fdr" ))
+
+
+
+
+write.table( tbl.garrido.sqtl, "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_EBV-lympho_sQTLs.tsv",
+             col.names = TRUE, row.names = FALSE, sep = "\t", quote = FALSE )
+
+write.table( tbl.garrido.gene, "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_EBV-lympho_sGenes.tsv",
+             col.names = TRUE, row.names = FALSE, sep = "\t", quote = FALSE )
+
+write.table( tbl.counts, "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_EBV-lympho_counts.tsv",
+             col.names = TRUE, row.names = FALSE, sep = "\t", quote = FALSE )
+```
+
+## 2.2 Test overlap 
+
+### Load our data
+
+```{r}
+# Tested sQTLs
+tbl.all <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-df.rds")
+# Significant sQTLs
+tbl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+```
+
+
+### sGenes | Whole Blood
+
+```{r SINGLE.test.fisher.diego-wb.genes.pro}
+lineages <- c( "T.CD4", "T.CD8", "MONO", "NK", "B" )
+conditions <- c( "NS", "IAV", "COV")
+
+tbl.fisher <- NULL
+tbl.garrido <- read.table( "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_whole-blood_sGenes.tsv",
+                           header = TRUE, sep = "\t" )
+
+# Remove geneId GENCODE suffix
+tbl.garrido$geneId <- unlist( lapply( tbl.garrido$geneId, function(x) strsplit( x, "\\." )[[1]][1] )) 
+
+tbl.garrido <- tbl.garrido %>% dplyr::distinct()
+
+for( lin in lineages ) {
+  for ( cond in conditions ) {
+    
+      tbl.sig <- tbl %>%
+        dplyr::filter( Condition == cond, lineage == lin ) %>%
+        dplyr::select( geneId, fdr ) %>%
+        dplyr::distinct()
+  
+      tbl.id <- tbl.all %>%
+        dplyr::filter( Condition == cond, lineage == lin ) %>%
+        dplyr::select( geneId ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !geneId %in% tbl.sig$geneId )
+      
+      tbl.a <- dplyr::full_join(tbl.sig, tbl.id, by = colnames( tbl.sig ))
+      tbl.a$geneId <- unlist( lapply( tbl.a$geneId, function(x)
+  strsplit( x, "\\." )[[1]][1] ))
+      
+      tbl.f <- test.overlap.pro( m1 = tbl.garrido,
+                                 m2 = tbl.a,
+                                 fdr.col.1 = "fdr",
+                                 fdr.col.2 = "fdr",
+                                 fdr.thres.1 = 0.05,
+                                 fdr.thres.2 = 0.01,
+                                 gene.col.1 = "geneId",
+                                 gene.col.2 = "geneId" ) 
+      tbl.f <- tbl.f %>%
+          dplyr::mutate( "Cell lineage" = lin, 
+                         "Condition" = cond,
+                         "Tissue" = "Whole Blood" )
+      if ( is.null( tbl.fisher ) ) {
+        tbl.fisher <- tbl.f
+        
+      } else {
+        tbl.fisher <- tbl.fisher %>%
+          dplyr::full_join(tbl.f, by = colnames( tbl.fisher ))
+      }
+    }
+  }
+
+tbl.fisher$FDR <-  p.adjust( tbl.fisher$p_value, method = "BH" )
+
+tbl.fisher <- tbl.fisher %>% 
+  dplyr::mutate( "Significant" =
+                   dplyr::case_when( FDR < 5e-02 & FDR > 5e-03 ~ "*",
+                                     FDR < 5e-03 & FDR > 5e-04 ~ "**",
+                                     FDR < 5e-04 & FDR > 5e-05 ~ "***",
+                                     FDR < 5e-05 ~ "****",
+                                     .default = "" ))
+
+write.table( tbl.fisher, "06_Overlaps/01_Processed-Data/02_01_GarridoMartin2021-fisher-test-WholeBlood-sGenes.tsv", 
+             col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+### sQTLs | Whole Blood
+
+```{r SINGLE.test.fisher.diego-wb.sqtls.pro}
+tbl.fisher <- NULL
+tbl.garrido <- read.table( "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_whole-blood_sQTLs.tsv", header = TRUE, sep = "\t" )
+
+for( lin in lineages ) {
+  for ( cond in conditions ) {
+    
+      tbl.sig <- tbl %>%
+        dplyr::filter( Condition == cond, lineage == lin ) %>%
+        dplyr::select( snpId, fdr ) %>%
+        dplyr::distinct()
+  
+      tbl.id <- tbl.all %>%
+        dplyr::filter( Condition == cond, lineage == lin ) %>%
+        dplyr::select( snpId ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !snpId %in% tbl.sig$snpId )
+      
+      tbl.a <- dplyr::full_join(tbl.sig, tbl.id, by = colnames( tbl.sig ))
+      
+      tbl.f <- test.overlap.pro( m1 = tbl.garrido,
+                                 m2 = tbl.a,
+                                 fdr.col.1 = "fdr",
+                                 fdr.col.2 = "fdr",
+                                 fdr.thres.1 = 0.05,
+                                 fdr.thres.2 = 0.01,
+                                 gene.col.1 = "snpId",
+                                 gene.col.2 = "snpId" ) 
+      tbl.f <- tbl.f %>%
+          dplyr::mutate( "Cell lineage" = lin, 
+                         "Condition" = cond,
+                         "Tissue" = "Whole Blood" )
+      if ( is.null( tbl.fisher ) ) {
+        tbl.fisher <- tbl.f
+        
+      } else {
+        tbl.fisher <- tbl.fisher %>%
+          dplyr::full_join(tbl.f, by = colnames( tbl.fisher ))
+      }
+    }
+  }
+
+tbl.fisher$FDR <-  p.adjust( tbl.fisher$p_value, method = "BH" )
+
+tbl.fisher <- tbl.fisher %>%
+  dplyr::mutate( "Significant" =
+                   dplyr::case_when( FDR < 5e-02 & FDR > 5e-03 ~ "*",
+                                     FDR < 5e-03 & FDR > 5e-04 ~ "**",
+                                     FDR < 5e-04 & FDR > 5e-05 ~ "***",
+                                     FDR < 5e-05 ~ "****",
+                                     .default = "" ))
+
+write.table( tbl.fisher, "06_Overlaps/01_Processed-Data/02_01_GarridoMartin2021-fisher-test-WholeBlood-sQTLs.tsv", 
+             col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+### sGenes | EBV-Transformed Lymphocytes
+
+```{r SINGLE.test.fisher.diego-ebv.genes.pro}
+tbl.fisher <- NULL
+tbl.garrido <- read.table( "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_EBV-lympho_sGenes.tsv", header = TRUE, sep = "\t" )
+
+# Remove geneId GENCODE suffix
+tbl.garrido$geneId <- unlist( lapply( tbl.garrido$geneId, function(x) strsplit( x, "\\." )[[1]][1] ))
+
+for( lin in lineages ) {
+  for ( cond in conditions ) {
+    
+      tbl.sig <- tbl %>%
+        dplyr::filter( Condition == cond, lineage == lin ) %>%
+        dplyr::select( geneId, fdr ) %>%
+        dplyr::distinct()
+  
+      tbl.id <- tbl.all %>%
+        dplyr::filter( Condition == cond, lineage == lin ) %>%
+        dplyr::select( geneId ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !geneId %in% tbl.sig$geneId )
+      
+      tbl.a <- dplyr::full_join(tbl.sig, tbl.id, by = colnames( tbl.sig ))
+      
+      tbl.a$geneId <- unlist( lapply( tbl.a$geneId, function(x)
+        strsplit( x, "\\." )[[1]][1] ))
+      
+      tbl.f <- test.overlap.pro( m1 = tbl.garrido,
+                                 m2 = tbl.a,
+                                 fdr.col.1 = "fdr",
+                                 fdr.col.2 = "fdr",
+                                 fdr.thres.1 = 0.05,
+                                 fdr.thres.2 = 0.01,
+                                 gene.col.1 = "geneId",
+                                 gene.col.2 = "geneId" ) 
+      tbl.f <- tbl.f %>%
+          dplyr::mutate( "Cell lineage" = lin, 
+                         "Condition" = cond,
+                         "Tissue" = "EBV-transformed lymphocytes" )
+      if ( is.null( tbl.fisher )) {
+        tbl.fisher <- tbl.f
+      } else {
+        tbl.fisher <- tbl.fisher %>%
+          dplyr::full_join(tbl.f, by = colnames( tbl.fisher ))
+      }
+    }
+  }
+
+tbl.fisher$FDR <-  p.adjust( tbl.fisher$p_value, method = "BH" )
+
+tbl.fisher <- tbl.fisher %>%
+  dplyr::mutate( "Significant" =
+                   dplyr::case_when( FDR < 5e-02 & FDR > 5e-03 ~ "*",
+                                     FDR < 5e-03 & FDR > 5e-04 ~ "**",
+                                     FDR < 5e-04 & FDR > 5e-05 ~ "***",
+                                     FDR < 5e-05 ~ "****",
+                                     .default = "" ))
+
+write.table( tbl.fisher, "06_Overlaps/01_Processed-Data/02_02_GarridoMartin2021-fisher-test-EBC-Lymphocytes-sGenes.tsv", 
+             col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+### sQTLs | EBV-Transformed Lymphocytes
+
+```{r SINGLE.test.fisher.diego-ebv.sqtls.pro}
+tbl.fisher <- NULL
+tbl.garrido <- read.table( "06_Overlaps/00_Raw-Data/02_GarridoMartin-2021/garrido-martin_EBV-lympho_sQTLs.tsv", header = TRUE, sep = "\t" )
+
+for( lin in lineages ) {
+  for ( cond in conditions ) {
+    
+      tbl.sig <- tbl %>%
+        dplyr::filter( Condition == cond, lineage == lin ) %>%
+        dplyr::select( snpId, fdr ) %>%
+        dplyr::distinct()
+  
+      tbl.id <- tbl.all %>%
+        dplyr::filter( Condition == cond, lineage == lin ) %>%
+        dplyr::select( snpId ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !snpId %in% tbl.sig$snpId )
+      
+      tbl.a <- dplyr::full_join(tbl.sig, tbl.id, by = colnames( tbl.sig ))
+      
+      tbl.f <- test.overlap.pro( m1 = tbl.garrido,
+                                 m2 = tbl.a,
+                                 fdr.col.1 = "fdr",
+                                 fdr.col.2 = "fdr",
+                                 fdr.thres.1 = 0.05,
+                                 fdr.thres.2 = 0.01,
+                                 gene.col.1 = "snpId",
+                                 gene.col.2 = "snpId" ) 
+      tbl.f <- tbl.f %>%
+          dplyr::mutate( "Cell lineage" = lin, 
+                         "Condition" = cond,
+                         "Tissue" = "EBV-transformed lymphocytes" )
+      if ( is.null( tbl.fisher )) {
+        tbl.fisher <- tbl.f
+      } else {
+        tbl.fisher <- tbl.fisher %>%
+          dplyr::full_join(tbl.f, by = colnames( tbl.fisher ))
+      }
+    }
+  }
+
+tbl.fisher$FDR <-  p.adjust( tbl.fisher$p_value, method = "BH" )
+
+tbl.fisher <- tbl.fisher %>%
+  dplyr::mutate( "Significant" =
+                   dplyr::case_when( FDR < 5e-02 & FDR > 5e-03 ~ "*",
+                                     FDR < 5e-03 & FDR > 5e-04 ~ "**",
+                                     FDR < 5e-04 & FDR > 5e-05 ~ "***",
+                                     FDR < 5e-05 ~ "****",
+                                     .default = " " ))
+
+write.table( tbl.fisher, "06_Overlaps/01_Processed-Data/02_02_GarridoMartin2021-fisher-test-EBC-Lymphocytes-sQTLs.tsv",
+             col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+## 2.3 Plot
+
+*Plot OR and of our sQTLs vs Garrido-Marting 2021 Whole Blood and EBV-transformed lymphocytes*
+
+- Re-do with our aesthetics
+```{r}
+sqtl.blood <- read.table("06_Overlaps/01_Processed-Data/02_01_GarridoMartin2021-fisher-test-WholeBlood-sQTLs.tsv", header = T, sep = "\t")
+
+sqtl.lymph <- read.table("06_Overlaps/01_Processed-Data/02_02_GarridoMartin2021-fisher-test-EBC-Lymphocytes-sQTLs.tsv", header = T, sep = "\t")
+sgenes.blood <- read.table("06_Overlaps/01_Processed-Data/02_01_GarridoMartin2021-fisher-test-WholeBlood-sGenes.tsv", header = T, sep = "\t")
+sgenes.lymph <- read.table("06_Overlaps/01_Processed-Data/02_02_GarridoMartin2021-fisher-test-EBC-Lymphocytes-sGenes.tsv", header = T, sep = "\t")
+
+sqtl <- data.table::rbindlist(list(sqtl.blood, sqtl.lymph))
+sgenes <- data.table::rbindlist(list(sgenes.blood, sgenes.lymph))
+
+df = plyr::ldply(list("TU-QTL" = sqtl, "TU-QTL gene" =sgenes), .id = "class")
+# Only consider baseline (as Garrido-Martín et al., 2021)
+df <- df[df$Condition %in% "NS", ]
+
+# Plot
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$Cell.lineage <- factor(df$Cell.lineage, levels = rev(names(color.vec)))
+
+# Plot
+plt <- ggplot(data = df, aes(x = odds.ratio, y = Cell.lineage, color = Cell.lineage)) + 
+  geom_point(size = 1) + 
+  geom_text(aes(x = odds.ratio, y = Cell.lineage, label = Significant), color = "black", vjust = -0.5, size = 3.5/.pt) + 
+  geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed", linewidth=0.25) +
+  geom_errorbarh(aes(xmax = conf.int.upper, xmin = conf.int.lower), size = .5, height = .2, linewidth=0.25) + 
+  scale_color_manual(guide = "none", values = color.vec) + 
+  facet_grid(class ~ Tissue, switch = "y") + 
+  labs(title = "tit", subtitle = "sub_tit") + ylab("y_lab") + xlab("Odds Ratio") + 
+  plot_theme + theme(axis.title.y = element_blank())
+plt
+
+file.name <- "06_Overlaps/02_Plots/03_celltype-fractions/02_Overlap-sGenes-GarridoMartin2021-01_OR.pdf"
+ggsave(file.name, plt, width = 8, height = 4.5, units = "cm")
+```
+
+
+## 3. Tian 2024 (Supplementary Fig. 16.C)
+
+### sGenes
+
+**NOTE** Tian et al. 2024 permuted results processing and merging for the genes retrieving has been done using the custom script `merge_tian_permuted.sh` found in the `/SCRIPTS/` directory.
+
+- Our data
+```{r}
+# Tested sQTLs
+tbl.all <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-df.rds")
+# Significant sQTLs
+tbl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+```
+
+```{r SINGLE.test.fisher.tian.genes.pro}
+lineages <- c( "T.CD4", "T.CD8", "MONO", "NK", "B" )
+tbl.fisher <- NULL
+tbl.tian <- read.table( "06_Overlaps/00_Raw-Data/03_Tian2024/02_processed-data/merged_permuted.tsv.gz",
+                        sep = "\t", header = TRUE )
+tbl.tian <- tbl.tian[ !stringr::str_detect( tbl.tian$gene_name, "^chr*" ), ]
+
+tbl.tian <- tbl.tian %>% tidyr::separate_rows( gene_name, sep = "," ) %>% dplyr::distinct()
+
+for( lin in lineages ) {
+    
+      tbl.sig <- tbl %>%
+        dplyr::filter( Condition == "NS", lineage == lin ) %>% # Consider only baseline sQTLs / sGenes
+        dplyr::select( gene_name, fdr ) %>%
+        dplyr::distinct()
+  
+      tbl.id <- tbl.all %>%
+        dplyr::filter( Condition == "NS", lineage == lin ) %>% # Consider only baseline sQTLs / sGenes
+        dplyr::select( gene_name ) %>%
+        dplyr::mutate( fdr = 1) %>% 
+        dplyr::distinct() %>% 
+        dplyr::filter( !gene_name %in% tbl.sig$gene_name )
+      
+      tbl.a <- dplyr::full_join(tbl.sig, tbl.id, by = colnames( tbl.sig ))
+      
+      tbl.tian.lin <- tbl.tian %>%
+        dplyr::filter( lineage == lin ) %>%
+        dplyr::rename( "fdr" = p.value)
+      
+      for ( ct in unique( tbl.tian.lin$cell.type )) {
+        
+        tbl.tian.ct <- tbl.tian.lin %>%
+          dplyr::filter( cell.type == ct ) %>%
+          as.data.frame()
+        
+        tbl.f <- test.overlap.pro( m1 = tbl.tian.ct,
+                                   m2 = tbl.a,
+                                   fdr.col.1 = "fdr",
+                                   fdr.col.2 = "fdr",
+                                   fdr.thres.1 = 0.05,
+                                   fdr.thres.2 = 0.01,
+                                   gene.col.1 = "gene_name",
+                                   gene.col.2 = "gene_name" ) 
+        tbl.f <- tbl.f %>%
+            dplyr::mutate( "Cell lineage" = lin, 
+                           "Cell type" = ct )
+        if ( is.null( tbl.fisher ) ) {
+          tbl.fisher <- tbl.f
+          
+        } else {
+          tbl.fisher <- tbl.fisher %>%
+            dplyr::full_join(tbl.f, by = colnames( tbl.fisher ))
+        }        
+      }
+  }
+
+tbl.fisher$FDR <-  p.adjust( tbl.fisher$p_value, method = "BH" )
+
+tbl.fisher <- tbl.fisher %>%
+  dplyr::mutate( "Significant" =
+                   dplyr::case_when( FDR < 5e-02 & FDR > 5e-03 ~ "*",
+                                     FDR < 5e-03 & FDR > 5e-04 ~ "**",
+                                     FDR < 5e-04 & FDR > 5e-05 ~ "***",
+                                     FDR < 5e-05 ~ "****",
+                                     .default = "" ))
+
+write.table( tbl.fisher, "06_Overlaps/01_Processed-Data/03_01_Tian2024-fisher-test-sGenes.tsv", 
+             col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+### sQTLs 
+
+**NOTE** Tian et al. 2024 nominal results processing and merging for the genes retrieving has been done using the custom script `merge_tian_nominal.sh` found in the `/SCRIPTS/` directory. Afterwards, the script `convert_snpId_tian.sh` found in the same directory was used to convert the SNP format from Tian et al., 2024 to the `rs#` format.
+
+```{r SINGLE.test.fisher.tian.sqtls.pro}
+tbl.fisher <- NULL
+
+in.files <- list.files( "06_Overlaps/00_Raw-Data/03_Tian2024/02_processed-data/nominal_mod/")
+
+for( i.file in in.files ) {
+  
+  tbl.tian <- data.table::fread( paste0("06_Overlaps/00_Raw-Data/03_Tian2024/02_processed-data/nominal_mod/", i.file),
+                           header = TRUE, sep = "\t" )
+  
+  lin <- unique( tbl.tian$lineage )
+  ct <- unique( tbl.tian$cell.type )
+  
+  tbl.sig <- tbl %>%
+    dplyr::filter( Condition == "NS", lineage == lin ) %>%
+    dplyr::select( snpId, fdr ) %>%
+    dplyr::distinct()
+  
+  tbl.id <- tbl.all %>%
+    dplyr::filter( Condition == "NS", lineage == lin ) %>%
+    dplyr::select( snpId ) %>%
+    dplyr::mutate( fdr = 1) %>% 
+    dplyr::distinct() %>% 
+    dplyr::filter( !snpId %in% tbl.sig$snpId )
+  
+  tbl.a <- dplyr::full_join(tbl.sig, tbl.id, by = colnames( tbl.sig ))
+      
+  tbl.tian <- tbl.tian %>%
+    dplyr::rename( "fdr" = p.value) %>%
+    as.data.frame()
+        
+  tbl.f <- test.overlap.pro( m1 = tbl.tian,
+                             m2 = tbl.a,
+                             fdr.col.1 = "fdr",
+                             fdr.col.2 = "fdr",
+                             fdr.thres.1 = 0.05,
+                             fdr.thres.2 = 0.01,
+                             gene.col.1 = "snpId",
+                             gene.col.2 = "snpId" ) 
+  tbl.f <- tbl.f %>%  dplyr::mutate( "Cell lineage" = lin, "Cell type" = ct )
+  
+  if ( is.null( tbl.fisher ) ) {
+    tbl.fisher <- tbl.f
+  } else {
+    tbl.fisher <- tbl.fisher %>%
+      dplyr::full_join(tbl.f, by = colnames( tbl.fisher ))
+  }
+  
+  print( paste0( "Done cell type: ", ct ))
+}
+
+tbl.fisher$FDR <-  p.adjust( tbl.fisher$p_value, method = "BH" )
+
+tbl.fisher <- tbl.fisher %>%
+  dplyr::mutate( "Significant" =
+                   dplyr::case_when( FDR < 5e-02 & FDR > 5e-03 ~ "*",
+                                     FDR < 5e-03 & FDR > 5e-04 ~ "**",
+                                     FDR < 5e-04 & FDR > 5e-05 ~ "***",
+                                     FDR < 5e-05 ~ "****",
+                                     .default = "" ))
+
+write.table( tbl.fisher, "06_Overlaps/01_Processed-Data/03_01_Tian2024-fisher-test-sQTLs.tsv", 
+             col.names = TRUE, row.names = FALSE, quote = FALSE, sep = "\t")
+```
+
+### Plot sGenes / sQTLs OR 
+
+```{r tian-prepare-OR-tbl}
+sgenes <- read.table("06_Overlaps/01_Processed-Data/03_01_Tian2024-fisher-test-sGenes.tsv",
+                      header = TRUE, sep = "\t")
+sqtl <- read.table("06_Overlaps/01_Processed-Data/03_01_Tian2024-fisher-test-sQTLs.tsv",
+                      header = TRUE, sep = "\t")
+
+df = plyr::ldply(list("TU-QTL" = sqtl, "TU-QTL gene" =sgenes), .id = "class")
+# 2025-10-24 keep celltypes present both in sGene and sQTL calculation
+common.cts <- intersect(sgenes$Cell.type, sqtl$Cell.type)
+df <- df[ df$Cell.type %in% common.cts, ]
+
+# Plot
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$Cell.lineage <- factor(df$Cell.lineage, levels = names(color.vec))
+
+# Plot
+plt <- ggplot(data = df, aes(x = odds.ratio, y = Cell.type, color = Cell.lineage)) + 
+  geom_point(size = 1) + 
+  geom_text(aes(x = odds.ratio, y = Cell.type, label = Significant), color = "black", vjust = -0.5, size = 3.5/.pt) + 
+  geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed", linewidth=0.25) +
+  geom_errorbarh(aes(xmax = conf.int.upper, xmin = conf.int.lower), size = .5, height = .2, linewidth=0.25) + 
+  scale_color_manual(guide = "none", values = color.vec) + 
+  facet_grid(Cell.lineage ~ class, switch = "y",  scales = "free", space = "free_y", drop = TRUE) + 
+  labs(title = "tit", subtitle = "sub_tit") + ylab("y_lab") + xlab("Odds Ratio") + 
+  plot_theme + theme(axis.title.y = element_blank())
+plt
+
+file.name <- "06_Overlaps/02_Plots/03_celltype-fractions/03_Overlap-sGenes-sQTLs-Tian2024-01_OR.pdf"
+ggsave(file.name, plt, width = 7, height = 6.5, units = "cm")
+```
+
+
+
+<!-- ## 4. Response sQTL Rotival  -->
+
+<!-- *2025-11-27* I want to check the overlap of Rotival et al., 2019 response-sQTLs across infections. Supp Data 3 (sheet 4) -->
+
+<!-- What does Rotival call a rsQTL: -->
+<!-- b Genes with FPKM < 10 in the non stimulated state and a log2FC>1 upon stimulation are considered as stimulation induced. For genes with FPKM>10 both at basal state and upon stimulation, sQTLs are considered as response sQTL if they have a *p-value > 0.001 in the non stimulated state*, and show a significant change in effect size between the non-stimulated and stimulated state (*p<0.01*, corresponding to 5% FDR). (info from Supp Data 3.D) -->
+
+
+<!-- ```{r} -->
+<!-- file.name <- "../../../00_Bibliography/2019-Rotival-Nat_splicing-response-to-infection-Supp/2019-Rotival-Nat_splicing-response-to-infection-SupplementaryData_3.xlsx" -->
+<!-- qtl <- readxl::read_excel(file.name, sheet = 4, skip = 9) -->
+<!-- str(qtl) -->
+
+<!-- qtl <- qtl[, c(c(1:4), c(18:27)) ] -->
+<!-- names(qtl) <- c("AS.event.ID", "gene_name", "event_type", "sQTL.peak.snp", -->
+<!--                 "NS.sQTL.p_value", "rsQTL.tested",  -->
+<!--                 "LPS.rsQTL.p_value", "LPS.rsQTL.effect_size",  -->
+<!--                 "Pam.rsQTL.p_value", "Pam.rsQTL.effect_size",  -->
+<!--                 "R848.rsQTL.p_value", "R848.rsQTL.effect_size",  -->
+<!--                 "IAV.rsQTL.p_value", "IAV.rsQTL.effect_size" -->
+<!--                 ) -->
+<!-- # tested rsQTLs -->
+<!-- qtl <- qtl[qtl$rsQTL.tested == "yes", ] -->
+<!-- # melt  -->
+<!-- qtl <- qtl[, c("AS.event.ID", "gene_name", "event_type", "sQTL.peak.snp", -->
+<!--         "NS.sQTL.p_value",  -->
+<!--         #"rsQTL.tested",  -->
+<!--         "LPS.rsQTL.p_value", "Pam.rsQTL.p_value", "R848.rsQTL.p_value", "IAV.rsQTL.p_value" -->
+<!--         )] -->
+
+<!-- qtl = reshape2::melt(qtl, measure.vars=c( "LPS.rsQTL.p_value", "Pam.rsQTL.p_value", "R848.rsQTL.p_value", "IAV.rsQTL.p_value")) -->
+<!-- qtl$variable <- gsub(".rsQTL.p_value", "", qtl$variable) -->
+
+<!-- qtl$value <- plyr::revalue(qtl$value, c("n.s." = "1", "n.a." = "1")) -->
+<!-- qtl$value <- as.numeric(qtl$value) -->
+<!-- qtl$NS.sQTL.p_value <- plyr::revalue(qtl$NS.sQTL.p_value, c("n.s." = "1", "n.a." = "1")) -->
+<!-- qtl$NS.sQTL.p_value <- as.numeric(qtl$NS.sQTL.p_value) -->
+
+<!-- # Filter  -->
+<!-- qtl <- qtl[qtl$NS.sQTL.p_value >0.001 & qtl$value <0.01, ] -->
+<!-- # count response specificity -->
+<!-- df = qtl %>% group_by(sQTL.peak.snp, AS.event.ID) %>% summarise(n_responses = n_distinct(variable), responses = paste0(variable, collapse=";")) -->
+
+<!-- # NUMBERAS DONT MATCH WITH PAPER but this is preliminary analysis -->
+<!-- df <- df %>% group_by(n_responses) %>% summarise(n_rsQTLs = n_distinct(sQTL.peak.snp)) -->
+<!-- df <- df %>% mutate(n_rsQTLs_rel = n_rsQTLs / sum(n_rsQTLs)) -->
+<!-- ``` -->
+

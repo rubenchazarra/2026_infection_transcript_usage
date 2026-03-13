@@ -1,0 +1,352 @@
+---
+title: "03_DTU-DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+
+- Infection DTU Data Analysis
+
+Code to generate Figure 2. B, C, E, F, G
+
+- Functions
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/01_infectionDTU/02_DA") # come back to notebook 
+```
+
+# Figure 2. B
+
+*Number of infection DTU genes upon influenza A virus (IAV) and SARS-CoV-2 (COV) stimulation across immune lineages.*^
+
+```{r}
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-filtered-df.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+#  N of DTU genes
+df <- dtu %>% group_by(Condition, celltype) %>% summarise(n_dtu = n_distinct(gene_id), .groups = "drop") 
+# subset 
+df <- df[df$Condition %in% c("IAV.NS", "COV.NS"), ]
+df$Condition <- factor(df$Condition, levels = names(condition.pairwise.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+df$celltype <- factor(df$celltype, levels = lineage.df$lineage)
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+model <- "rel_abundances ~ Intercept + Run + Age + POP"
+# Plot 
+# tit <- "infectionDTU Aquino 2023"
+# sub_tit <- paste( model , " | FDR < 0.05")
+# x_lab <- "Cell type"
+y_lab <- "N infection DTU Genes"
+
+# Plot 
+plt <- ggplot(data = df, aes(x = celltype, y = n_dtu, fill = celltype )) +
+  geom_bar(stat= "identity", linewidth=0.25, position = position_stack(), color = "white") + 
+  # Labels
+  geom_text(data = df, aes(label = n_dtu), color = "black", size = 3.5/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  # xlim(0, 600) + 
+  facet_grid( ~ Condition,  labeller = labeller(Condition = condition.pairwise.vec.short) ) +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_color_manual("Condition", values = condition.pairwise.color.vec.short, drop = F) +
+  # labs(title = tit, subtitle = sub_tit) + xlab(x_lab) +
+  ylab(y_lab) + 
+  plot_theme + 
+  theme(axis.text.x = element_text(angle=30, hjust =1), axis.title.x = element_blank()) + 
+  guides(fill = FALSE, color = FALSE ) 
+
+plt
+# Save
+file.name <- "02_Plots/05_Filt-1-5-0.8-0.01/01_03_infectionDTU-01_lineage-by-Condition-Horizontal.pdf" ## Figure 2. B
+ggsave(file.name, plt, width = 6, height = 3.5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 6, height = 3.5, units = "cm")
+```
+
+
+## Get numbers in the paper
+
+"We observed that viral stimulation induces extensive remodeling of transcript usage across all immune lineages (1497 total unique infection DTU genes) (Fig. 2b; Supplementary Data 2a). The response was broader for IAV than for COV, with 47% more genes showing transcript usage shifts, consistent with the stronger transcriptional activation previously reported for IAV."
+
+```{r}
+# N unique infection DTU genes
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-filtered-df.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+# keep IAV-Baseline and COV-Baseline
+dtu <- dtu[dtu$Condition %in% c("IAV.NS", "COV.NS"), ]
+length(unique(dtu$gene_name))
+
+# Comparison of responses
+df <- dtu %>% group_by(Condition) %>% summarise(n_dtu_genes = length(fdr < 0.05))
+# How much larger is IAV transcript usage response compared to COV response
+(df[df$Condition %in% "IAV.NS", "n_dtu_genes"] / df[df$Condition %in% "COV.NS", "n_dtu_genes"] )-1
+```
+
+# Figure 2. C
+
+Because immune activation is known to induce isoform switching25–28, we examined whether infection DTU genes showed changes in the dominant isoform. Following infection, 16–29% of DTU genes shift to an alternative dominant EC. Over half of these events (57.5%) correspond to switches in the most abundant isoform (Fig. 2c), as the switching ECs map to distinct transcript sets —for example, the ORMDL1 gene in B cells upon COV infection (Fig. 2d).
+
+*How many of the EC switches involve ECs that of non overlapping transcripts? E.g t1 vs t1,t2 would overlap, t1 vs t2 would not*. This plot does not stratify by DTU response (e.g IAV-Baseline, COV-Baseline)
+```{r}
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-filtered-df.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu <- dtu[dtu$Condition %in% c("IAV.NS", "COV.NS"), ]
+dtu$is.EC.switch <- as.logical(dtu$is.EC.switch)
+
+#  N of Tx switches among EC switches 
+df <- dtu %>% group_by(celltype, is.EC.switch, is.transcript.switch) %>% summarise(n_genes = n(), .groups = "drop")
+df <- df %>% group_by(celltype) %>% mutate(n_genes_rel = n_genes / sum(n_genes))
+df$celltype <- factor(df$celltype, levels = rev(lineage.df$lineage))
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+model <- "rel_abundances ~ Intercept + Run + Age + POP"
+iso.switch.vec <- c("TRUE" = "Iso switch", "FALSE" = "No Iso switch" )
+# Plot 
+tit <- "infectionDTU Aquino 2023"
+sub_tit <- paste( model , " | FDR < 0.05")
+x_lab <- "% infection DTU genes with EC switch"
+y_lab <- "Cell type"
+
+# Plot 
+df <- df[df$is.EC.switch, ]
+plt <- ggplot(data = df, aes(x = n_genes_rel, y = celltype, fill = celltype, alpha = is.transcript.switch)) +
+  geom_bar(aes(group = is.transcript.switch), stat= "identity", linewidth=0.25, position = position_stack(reverse = F), color = "white") + 
+  scale_alpha_manual("", values = c(0.8, 1), labels = iso.switch.vec) +
+  geom_text(data = df, aes(x = n_genes_rel, label = n_genes, group = is.transcript.switch), color = "black", alpha = 1,  # Labels
+            size = 3.5/.pt, hjust = 0.5, position = position_stack(vjust = .5, reverse = F)) +
+  scale_fill_manual( values = lineage.color.vec ) +
+  labs(title = tit, subtitle = sub_tit) + xlab(x_lab) + ylab(y_lab) + 
+  plot_theme + 
+  theme(axis.title.y = element_blank(), axis.title.x = element_text(hjust = 1),
+        legend.position="bottom", legend.box="horizontal", 
+        legend.box.spacing = unit(0, "cm"),
+        legend.box.margin = margin(0, 0, 0, 0, unit = "cm"),
+        plot.margin = unit(c(0.1, 0.1, 0, 0.1), "cm"),
+        legend.spacing.y = unit(0, "cm"), 
+        legend.key.spacing.x = unit(0, "cm")) + 
+  guides(fill = FALSE, color = FALSE, 
+          alpha=guide_legend( override.aes = list(label = "", size = 1, ncol=1), reverse = T)) 
+
+plt
+# Save
+file.name <- "02_Plots/05_Filt-1-5-0.8-0.01/01_07_02_infectionDTU-N-DTU-EC-switch-Transcript-switch-no-Condition.pdf"
+ggsave(file.name, plt, width = 4, height = 3.5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 4, height = 3.5, units = "cm", bg = "white")
+```
+
+## Get numbers in the paper
+- Numbers in paper
+```{r}
+# How many infection DTU genes have a switch in their most abundant EC ? ("EC switch")
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-filtered-df.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu <- dtu[dtu$Condition %in% c("COV.NS", "IAV.NS"), ]
+df <- dtu %>% group_by(celltype, Condition, is.EC.switch) %>% summarise(n_genes = n())
+df <- df %>% group_by(celltype, Condition) %>%  mutate (n_genes_rel = n_genes / sum(n_genes))
+df <- df[df$is.EC.switch == "TRUE", ]
+df[ which.min(df$n_genes_rel), ]
+df[ which.max(df$n_genes_rel), ]
+
+# Within EC switches, how many are "isoform switches", given the switching ECs map to distinct transcript sets (e.g, EC1{t1,t2} is dominant in Baseline, and EC2{t3} is dominant in IAV)
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-filtered-df.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu <- dtu[dtu$Condition %in% c("COV.NS", "IAV.NS"), ]
+dtu <- dtu[dtu$is.EC.switch == "TRUE", ]
+df <- dtu %>% group_by(is.transcript.switch) %>% summarise(n_genes = n())
+df <- df %>%  mutate (n_genes_rel = n_genes / sum(n_genes))
+```
+
+# Fig 2.E
+
+*Fig 2.E* Heatmap of infection DTU gene sharing based on the spearman correlation of MD values considering genes significant in at least one of the lineage-response combinations. Hierarchical clustering of lineage-response pairs is displayed.
+
+```{r}
+library(RColorBrewer)
+
+dtu.l <- readRDS("01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-unfiltered-list.rds")
+dtu.l <- dtu.l$lineage
+dtu.l <- lapply(dtu.l, function(x) x[c("IAV.NS", "COV.NS")])
+dtu.l <- unlist(dtu.l, recursive = F)
+gene.l <- lapply(dtu.l, function(x) x$gene_name)
+# Get intersection of genes tested in all conditions
+# gene.vec <- Reduce(intersect, gene.l) 
+# dtu.l <- lapply(dtu.l, function(x){  x[match(gene.vec, x$gene_name),]}) # subset
+
+cor.l <- lapply(dtu.l, function(x1) # correlate MDs
+  lapply(dtu.l, function(x2){
+    print(paste0(nrow(x1), ":", nrow(x2)))    
+     df <- merge(x1, x2, by = c("gene_id", "gene_name"), all = F)
+     # keep infection DTU genes significant in at least one condition 
+     keep.genes <- df$is.DTU.lineage.x | df$is.DTU.lineage.y
+     df <- df[ keep.genes , ]
+     cor.result <- cor.test(df$fdr.x, df$fdr.y, method = "spearman")
+     data.frame(cor = cor.result[["estimate"]][["rho"]], p.val = cor.result$p.value)
+  }))
+
+# Create matrix
+l <- lapply(cor.l, function(c_1) plyr::ldply(c_1, .id = "celltype_1"))
+df <-  plyr::ldply(l, .id = "celltype_2")
+cts <- unique(df$celltype_1)
+n_cts <- length(cts)
+mat <- matrix(df$cor, nrow = n_cts, ncol = n_cts, dimnames = list(cts, cts))
+
+# Annotation and annotation colors 
+annotation_col <- data.frame(lineage = gsub(".IAV.NS|.COV.NS", "", rownames(mat)),
+                             Condition = gsub("B.|NK.|MONO.|T.CD4.|T.CD8.", "", rownames(mat))
+)
+annotation_col$Condition <- gsub(".NS", "", annotation_col$Condition) # shorten condition
+# Change mat names
+new_names <- paste0(annotation_col$lineage, " ", annotation_col$Condition)
+rownames(mat) <- colnames(mat) <- new_names
+rownames(annotation_col) <- rownames(mat)  # match column names of mat
+
+ann_colors <- list(lineage = lineage.color.vec, Condition = c( "IAV" = "#75A9D1", "COV" = "#c1121f") )
+
+# Define Spectral palette (reversed so blue → red)
+spectral_palette <- colorRampPalette(rev(brewer.pal(11, "Spectral")))(16)
+
+# Heatmap with lineage and Condition annotations
+ph <- pheatmap::pheatmap(
+  mat = mat,
+  clustering_distance_rows = "euclidean",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  color = spectral_palette,
+  display_numbers = FALSE,
+  annotation_col = annotation_col,
+  annotation_row = annotation_col,
+  annotation_colors = ann_colors,
+  legend = TRUE,
+  legend_labels = as.character(seq(-0.4, 1, 0.2)),  # Add legend title
+  legend_breaks = seq(-0.4, 1, 0.2),
+  main = NA,  # Remove plot title
+  fontsize = 9, # to adjust for inch saving ? 
+  border_color = "white"
+)
+
+# Save
+file.name <- paste0("02_Plots/05_Filt-1-5-0.8-0.01/01_06_04-MD-clustering-01_lineage.pdf")  ## Fig 2.E
+inch = 2.54
+pdf(file.name, height = 11/inch, width = 14/inch)
+print(ph)
+dev.off()
+```
+
+
+### Figure 2. F
+
+*Condition sharing of infection DTU genes*
+
+f) Sharing of infection DTU genes across IAV and COV responses considering genes tested in both responses for each immune lineage separately.
+
+```{r}
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu <- list("IAV.NS" = lapply(dtu, function(ct) ct[["IAV.NS"]]), "COV.NS" = lapply(dtu, function(ct) ct[["COV.NS"]]))
+
+dtu <-lapply(dtu, function(ct){ # subset for genes tested in IAV and COV across immune lineages
+  gene.l <- lapply(ct, function(x) x$gene_id)
+  gene.vec <- Reduce(intersect, gene.l)
+  ct <- lapply(ct, function(x) x[x$gene_id %in% gene.vec , ] )
+  data.table::rbindlist(ct) # merge
+})
+df <- data.table::rbindlist(dtu)
+df <- df %>% group_by(Condition, gene_name) %>% filter(fdr < 0.05) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(n_lineages) %>% summarise(n_genes = n()) # irrespective of condition
+df <- df %>%  mutate(n_genes_rel = n_genes / sum(n_genes)) 
+df$n_lineages <- factor(df$n_lineages, levels = c(1:5))
+
+plt <- ggplot(df, aes(y = NA, x = n_genes_rel, fill = n_lineages)) + 
+  geom_bar(stat = "identity", color = "black", linewidth = 0.25, position = position_stack(reverse = T)) + 
+   geom_text(data = df[df$n_lineages %in% c("1", "2"), ], 
+             aes(label = round(n_genes_rel, 2)), position = position_stack(vjust = 0.5, reverse = T), color="black", size=3.5/.pt) + 
+  scale_fill_brewer("N lineages", palette = "Blues") + 
+  xlab("% of infection DTU Genes") + 
+  plot_theme + 
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(), axis.ticks.y = element_blank(), 
+        axis.line.y = element_blank())+ 
+  guides(fill = guide_legend(byrow = FALSE, override.aes = list(color = "white", linewidth = 0.15)))
+
+plt
+
+lin.plt <- plt
+# file.name <- "02_Plots/05_Filt-1-5-0.8-0.01/04_02_infectionDTU-sharing-BarPlot-no-Condition.pdf"
+# ggsave(file.name, plt, width = 5, height = 2.5, units = "cm")
+```
+
+# Figure 2. G
+
+*Lineage  sharing of infection DTU genes*
+
+g) Sharing of infection DTU genes across immune lineages considering genes tested in all lineages for each response separately.
+
+```{r}
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu <-lapply(dtu, function(ct){ # subset for genes tested in IAV and COV across cell types
+  ct <- ct[c("IAV.NS", "COV.NS")]
+  gene.l <- lapply(ct, function(x) x$gene_id)
+  gene.vec <- Reduce(intersect, gene.l)
+  ct <- lapply(ct, function(x) x[x$gene_id %in% gene.vec, ] )
+  data.table::rbindlist(ct) # merge
+})
+df <- data.table::rbindlist(dtu) # merge by lineage
+
+df <- df %>% group_by(lineage, gene_name) %>% filter(fdr < 0.05) %>% summarise(Condition = paste(Condition, collapse = ","))
+df <- df %>% group_by(Condition) %>% summarise(n_genes = n()) # irrespective of lineage, counting all lineages
+df <- df %>% mutate(n_genes_rel = n_genes / sum(n_genes) )
+
+df$Condition <- plyr::revalue(df$Condition, c("COV.NS" = "COV", "COV.NS,IAV.NS" = "Both", "IAV.NS,COV.NS" = "Both", "IAV.NS" = "IAV"))
+df$Condition <- factor(df$Condition, levels = c("COV", "Both", "IAV"))
+color.vec <- c("IAV" = "#75A9D1", "Both" = "#f1faee",  "COV"= "#c1121f")
+df$Condition <- factor(df$Condition, levels = names(color.vec))
+
+plt <- ggplot(df, aes(y = NA, x = n_genes_rel, fill = Condition)) + 
+  geom_bar(width=0.8, stat = "identity", color = "black", 
+           linewidth = 0.25, position = position_stack(reverse = T)) + 
+  geom_text(aes(label = round(n_genes_rel, 2)), position = position_stack(vjust = 0.5, reverse = T), color="black", alpha = 1, size=3.5/.pt, angle = 0) + 
+  scale_alpha_discrete("", range=c(1, 0.5, 0.25)) +
+  scale_fill_manual( values = color.vec ) +
+  xlab("% of infection DTU Genes") + 
+  plot_theme + 
+  theme(axis.title.y = element_blank(), axis.line.y = element_blank(),
+        axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+        legend.box.spacing = unit(0, "cm"),
+        legend.key.size = unit(0.1, "cm"),
+        legend.title = element_text(size = 5, margin = margin(b = 0, unit = "cm")),
+        legend.justification = c(1, 1), 
+        legend.key = element_rect(fill = "white", color = NA) 
+        ) + 
+   guides(fill = guide_legend(byrow = FALSE, override.aes = list(color = "white", linewidth = 0.15)))
+
+plt
+cond.plt <- plt
+file.name <- "02_Plots/05_Filt-1-5-0.8-0.01/04_03_infectionDTU-Condition-sharing.pdf"
+ggsave(file.name, plt, width = 5, height = 1.5, units = "cm")
+```
+
+- Merge Condition No DGE + Lineage No DGE
+```{r}
+a <- cowplot::plot_grid(
+    # 1) N genes
+    cond.plt + theme (axis.text.x = element_blank(), 
+                      axis.title.x = element_blank(), 
+                      axis.line.x = element_blank(), 
+                      axis.ticks.x = element_blank(), 
+                      legend.justification = c(0, 1)), 
+    # 2) Sharing barplot
+    lin.plt,# + theme(legend.justification = c(-2, 1.5)),  
+    ncol = 1, align = "v", axis = "rl" , rel_heights =  c(0.3, 0.7)
+    )
+
+file.name <- "02_Plots/05_Filt-1-5-0.8-0.01/04_03_02_infectionDTU-Lineage-Condition-sharing.pdf"
+ggsave(file.name, a, width = 5, height = 3.5, units = "cm")
+```

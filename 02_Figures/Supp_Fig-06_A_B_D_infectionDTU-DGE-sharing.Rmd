@@ -1,0 +1,243 @@
+---
+title: "03_DGE-Viz"
+author: "Ruben Chazarra Gil"
+date: "2024-06-05"
+output: html_document
+---
+
+## 0. Goal 
+
+Plotting *Supplementary Fig. 6.* A, B, D
+
+Supplementary Fig. 6. Sharing patterns of infection-associated differential transcript usage (DTU) and differential gene expression (DGE).  
+
+a) Proportion of infection-responsive genes identified by DTU and DGE analyses that are specific to influenza A virus (IAV), specific to SARS-CoV-2 (COV), or shared between both stimulations. 
+
+b) Proportion of infection-responsive genes identified by DTU and DGE analyses that are shared across increasing numbers of immune lineages. 
+
+c) Upset plots showing the overlap of infection-associated DTU for gene sets containing more than 3 DTU genes. 
+
+d) Upset plots showing the overlap of infection-associated DGE for gene sets containing more than 25 genes. In both plots, the analysis is restricted to genes tested in both responses within each immune lineage. 
+
+- Load functions
+```{r }
+source("../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/01_DGE/01_infectionDGE/02_DA/")
+```
+
+
+
+# Supp. Fig 6.A Compare DTU, DGE CONDITION sharing
+
+*Supplementary Fig. 6. a) Proportion of infection-responsive genes identified by DTU and DGE analyses that are specific to influenza A virus (IAV), specific to SARS-CoV-2 (COV), or shared between both stimulations. *
+
+```{r}
+## DTU
+file.name <- "../../../02_DTU/02_DTU/01_infectionDTU/02_DA/01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+# Subset for genes tested in IAV and COV across cell types
+dtu <-lapply(dtu, function(ct){
+  ct <- ct[c("IAV.NS", "COV.NS")]
+  gene.l <- lapply(ct, function(x) x$gene_id)
+  gene.vec <- Reduce(intersect, gene.l)
+  ct <- lapply(ct, function(x) x[x$gene_id %in% gene.vec, ] )
+  data.table::rbindlist(ct) # merge
+})
+df <- data.table::rbindlist(dtu) # merge by lineage
+df <- df %>% group_by(lineage, gene_name) %>% filter(fdr < 0.05) %>% summarise(Condition = paste(Condition, collapse = ","))
+df <- df %>% group_by(Condition) %>% summarise(n_genes = n()) # irrespective of lineage, counting all lineages
+df.1 <- df %>% mutate(n_genes_rel = n_genes / sum(n_genes) )
+
+## DGE
+file.name <- "01_Processed-Data/05_include-Library/01_infectionDGE-unfiltered-list.rds"
+dge.l <- readRDS(file.name)
+dge <- dge.l$lineage
+dge <- lapply(dge, function(x) x[c("IAV.NS", "COV.NS")])
+# subset for genes tested in IAV and COV across cell types
+dge <- lapply(dge, function(ct){ 
+  gene.l <- lapply(ct, function(x) x$genes)
+  gene.vec <- Reduce(intersect, gene.l)
+  ct <- lapply(ct, function(x) x[x$genes %in% gene.vec, ] )
+  plyr::ldply(ct, .id = "Condition") # merge
+})
+dge <- plyr::ldply(dge, .id = "lineage")
+df <- dge %>% group_by(lineage, genes) %>% filter(fdr < 0.01 & abs(betas) > 0.5) %>% summarise(Condition = paste0(Condition, collapse=","))
+df <- df %>% group_by(Condition) %>% summarise(n_genes = n()) # Irrespective of lineage
+df.2 <- df %>% mutate(n_genes_rel = n_genes / sum(n_genes)) 
+
+# merge
+df <- plyr::ldply(list("DTU" = df.1, "DGE" = df.2), .id = "class")
+
+condition.vec <- c("COV.NS" = "COV", "IAV.NS" = "IAV", "IAV.NS,COV.NS" = "Both")
+df$Condition <- plyr::revalue(df$Condition, condition.vec)
+df$Condition <- factor(df$Condition, levels = c("COV", "Both", "IAV"))
+color.vec <- c("Both" = "#f1faee", "IAV" = "#75A9D1", "COV"= "#c1121f")
+df$class <- factor(df$class, c("DGE", "DTU"))
+
+plt <- ggplot(df, aes(y = class, x = n_genes_rel, fill = Condition)) + 
+  geom_bar(stat = "identity", color = "black", linewidth = 0.25, position = position_stack(reverse = F)) + 
+  geom_text(aes(label = round(n_genes_rel, 2)), position = position_stack(vjust = 0.5, reverse = F), 
+             color="black", size=3.5/.pt, angle = 0) + 
+  scale_fill_manual("Condition", values = color.vec) + 
+  xlab("% of infection-responsive Genes") + 
+  plot_theme + 
+  theme(axis.title.y = element_blank(), axis.text.y = element_text(angle = 90, vjust =-5, hjust = 0.5), 
+        axis.ticks.y = element_blank(), axis.line.y = element_blank())+ 
+  guides(fill = guide_legend(byrow = FALSE, override.aes = list(color = "white", linewidth = 0.15)))
+
+
+file.name <- "02_Plots/05_include-Library/04_05_infectionDGE-vs-DTU-01_Condition-Sharing.pdf" # Supplementary Fig. 6. a)
+ggsave(file.name, plt, width = 5, height = 3, units = "cm")
+```
+
+# Supp. Fig 6.B Compare DTU, DGE LINEAGE sharing 
+
+*Supplementary Fig. 6. b) Proportion of infection-responsive genes identified by DTU and DGE analyses that are shared across increasing numbers of immune lineages.*
+
+```{r}
+## DTU
+file.name <- "../../../02_DTU/02_DTU/01_infectionDTU/02_DA/01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu <- list("IAV.NS" = lapply(dtu, function(ct) ct[["IAV.NS"]]), "COV.NS" = lapply(dtu, function(ct) ct[["COV.NS"]]))
+
+dtu <-lapply(dtu, function(ct){ # subset for genes tested in IAV and COV across cell types
+  gene.l <- lapply(ct, function(x) x$gene_id)
+  gene.vec <- Reduce(intersect, gene.l)
+  ct <- lapply(ct, function(x) x[x$gene_id %in% gene.vec , ] )
+  data.table::rbindlist(ct) # merge
+})
+df <- data.table::rbindlist(dtu)
+df <- df %>% group_by(Condition, gene_name) %>% filter(fdr < 0.05) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(n_lineages) %>% summarise(n_genes = n()) # irrespective of condition
+df.1 <- df %>%  mutate(n_genes_rel = n_genes / sum(n_genes)) 
+
+## DGE
+file.name <- "01_Processed-Data/05_include-Library/01_infectionDGE-unfiltered-list.rds"
+dge.l <- readRDS(file.name)
+dge <- dge.l$lineage
+dge <- list("IAV.NS" = lapply(dge, function(ct) ct[["IAV.NS"]]), "COV.NS" = lapply(dge, function(ct) ct[["COV.NS"]]))
+# subset for genes tested in IAV and COV across cell types
+dge <- lapply(dge, function(ct){ 
+  gene.l <- lapply(ct, function(x) x$genes)
+  gene.vec <- Reduce(intersect, gene.l)
+  ct <- lapply(ct, function(x) x[x$genes %in% gene.vec , ] )
+  data.table::rbindlist(ct) # merge lineage
+  plyr::ldply(ct, .id = "lineage")
+})
+dge <- plyr::ldply(dge, .id = "Condition") # merge by Condition
+
+df <- dge %>% group_by(Condition, genes) %>% filter(fdr < 0.01 & abs(betas) > 0.5) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(n_lineages) %>% summarise(n_genes = n()) # irrespective of condition
+df.2 <- df %>%  mutate(n_genes_rel = n_genes / sum(n_genes)) 
+
+# merge
+df <- plyr::ldply(list("DTU" = df.1, "DGE" = df.2), .id = "class")
+df$n_lineages <- factor(df$n_lineages, levels = c(1:5))
+df$class <- factor(df$class, c("DGE", "DTU"))
+
+# Plot
+plt <- ggplot(df, aes(y = class, x = n_genes_rel, fill = n_lineages)) + 
+  geom_bar(stat = "identity", color = "black", linewidth = 0.25, position = position_stack(reverse = T)) +
+  geom_text(data = df[df$n_lineages %in% c("1", "2"), ], 
+            aes(label = round(n_genes_rel, 2)), position = position_stack(vjust = 0.5, reverse = T), color="black", size=3.5/.pt) + 
+  scale_fill_brewer("N lineages", palette = "Blues") + 
+  xlab("% of infection-responsive Genes") + 
+  plot_theme + 
+   theme(axis.title.y = element_blank(), axis.text.y = element_text(angle = 90, vjust =-5, hjust = 0.5), 
+        axis.ticks.y = element_blank(), axis.line.y = element_blank())+ 
+  guides(fill = guide_legend(byrow = FALSE, override.aes = list(color = "white", linewidth = 0.15)))
+plt
+
+file.name <- "02_Plots/05_include-Library/04_05_infectionDGE-vs-DTU-02_Lineage-Sharing.pdf" # Supplementary Fig. 6. b)
+ggsave(file.name, plt, width = 5, height = 3, units = "cm")
+```
+
+
+# Supp Fig. 6. D
+
+*Supplementary Fig. 6. d) Upset plots showing the overlap of infection-associated DGE for gene sets containing more than 25 genes. In both plots, the analysis is restricted to genes tested in both responses within each immune lineage. *
+
+- Read data 
+```{r}
+file.name <- "01_Processed-Data/05_include-Library/01_infectionDGE-filtered-list.rds"
+dge.l <- readRDS(file.name)
+# select lineage
+dge.l <- dge.l$lineage
+# unlist one level
+dge.l <- unlist(dge.l, recursive = F)
+# Remove IAV.COV comparison from here
+dge.l <- dge.l[grep("IAV.COV", names(dge.l), invert = T) ]
+# Get gene_id
+dge.l <- lapply(dge.l, function(x) x$genes)
+
+# Pre-process for upset
+df <- prepare.ComplexUpset(dge.l)
+```
+
+- ComplexUpset Plot * Work has to be done here*
+```{r}
+# naming
+colnames(df) <-  gsub("(.*)\\.(.*\\..*)", "\\1_\\2", colnames(df))
+name.df <- data.frame(ct_condition = colnames(df))
+name.df$lineage <- gsub("_.*", "", name.df$ct_condition)
+name.df$Condition <-  gsub(".*_", "", name.df$ct_condition)
+name.df <- merge(name.df,  lineage.df[, c("lineage", "color")], by = "lineage")
+name.df$Condition_2 <- plyr::revalue(name.df$Condition, condition.pairwise.vec.short)
+name.df$lineage_Condition_2 <- paste0(name.df$lineage, " ", name.df$Condition_2)
+# subset name.df
+name.df <- name.df[name.df$ct_condition %in% colnames(df), ]
+name.vec <- setNames(name.df$lineage_Condition_2, nm = name.df$ct_condition)
+
+min_set_size = 25
+font_size = 6
+# Plot
+plt <- ComplexUpset::upset(df, names(df), 
+                           min_size = min_set_size,
+                           set_sizes = FALSE, 
+                           labeller = ggplot2::as_labeller(name.vec), 
+                           name = NULL, 
+                           height_ratio=0.8,
+                           matrix=( intersection_matrix(geom=geom_point(size=1))), 
+                           
+                    base_annotations = list(
+                      # Barplot
+                      'N infection DEGs' = intersection_size( fill = "#778da9",
+                                                            text = list(size = 5/.pt, angle=90, vjust = 0.5, hjust = -0.2),
+                                                            text_colors = c(on_background = "black",
+                                                                            on_bar = "black")) +
+                                      theme( panel.grid = element_blank(), axis.line = element_line(), 
+                                             axis.title.y = element_text(size = font_size, vjust = -25),
+                                             axis.text.y  = element_text(size = font_size))
+                      ),
+                    themes=upset_modify_themes(
+                      list(
+                        'intersection_size'=theme(text=element_text(size=font_size),
+                                                  plot.margin = margin(0, 0, 0, 0, unit = "cm")),
+                        'intersections_matrix'=theme(text=element_text(size=font_size),
+                                                     plot.margin = margin(0, 0, 0, 0, unit = "cm"))
+                        )), 
+queries=list(upset_query(set= "T.CD4_IAV.NS", color = "#355070", fill="#355070"), 
+             upset_query(set= "T.CD4_COV.NS", color = "#355070", fill="#355070"), 
+             # upset_query(set= "T.CD4.IAV.COV", fill="#355070"), 
+             upset_query(set= "T.CD8_IAV.NS", color = "#b56576", fill="#b56576"), 
+             upset_query(set= "T.CD8_COV.NS", color = "#b56576", fill="#b56576"),
+             # upset_query(set= "T.CD8_IAV.COV", color = "#b56576", fill="#b56576"),
+             upset_query(set= "MONO_IAV.NS", color = "#6d597a", fill="#6d597a"), 
+             upset_query(set= "MONO_COV.NS", color = "#6d597a", fill="#6d597a"),
+             # upset_query(set= "MONO_IAV.COV", color = "#6d597a", fill="#6d597a"), 
+             upset_query(set= "NK_IAV.NS", color = "#eaac8b", fill="#eaac8b"), 
+             upset_query(set= "NK_COV.NS", color = "#eaac8b", fill="#eaac8b"),
+             # upset_query(set= "NK.IAV.COV", fill="#eaac8b"), # no hits
+             upset_query(set= "B_IAV.NS", color = "#e56b6f", fill="#e56b6f"),
+             upset_query(set= "B_COV.NS", color = "#e56b6f", fill="#e56b6f")#,
+             #upset_query(set= "B.IAV.COV", fill="#e56b6f") # no hits
+             ))
+plt
+
+file.name<- paste0("02_Plots/05_include-Library/04_01_infectionDGE-sharing-ComplexUpset-min-set-", min_set_size, ".pdf") # Supplementary Fig. 6. d)
+ggsave(file.name, plt, width = 12, height = 6, units = "cm")
+```
+

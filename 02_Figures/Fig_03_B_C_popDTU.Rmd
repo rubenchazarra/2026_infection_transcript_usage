@@ -1,0 +1,146 @@
+---
+title: "03_DTU-Viz"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## 0. Goal 
+
+Figures in this notebook: 
+
+- Fig. 3. b) Number of population DTU genes across lineages and conditions detected (FDR<0.05) with and without adjusting for cell composition. 
+- Fig. 3. c) Sharing of population DTU genes across immune lineages, considering only genes tested in all lineages within each condition. 
+
+ 
+- Load data 
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/")
+```
+
+
+# Fig. 3.B
+
+*Fig. 3. b) Number of population DTU genes across lineages and conditions detected (FDR<0.05) with and without adjusting for cell composition.*
+```{r}
+dtu1 <- readRDS("01_Processed-Data/05_Filt-1-5-0.8-0.01/01_popDTU-filtered-df.rds") # Model without adjusting for cell composition
+dtu2 <- readRDS("01_Processed-Data/06_celltype-fractions/01_popDTU-filtered-df.rds") # Model adjusting for cell composition
+dtu1 <- dtu1$lineage
+dtu2 <- dtu2$lineage
+
+dtu1 <- dtu1 %>% group_by(celltype, Condition) %>% summarise(n_dtu = n_distinct(gene_id))
+dtu2 <- dtu2 %>% group_by(celltype, Condition) %>% summarise(n_dtu = n_distinct(gene_id))
+
+df <- merge(dtu1, dtu2, by = c("celltype", "Condition"), all = T)
+names(df)[ match(c("n_dtu.x", "n_dtu.y"), names(df))] <- c("Not_Adjusted", "Adjusted")
+
+# Subtract Not_Adjusted - Adjusted
+df$Not_Adjusted <- df$Not_Adjusted - df$Adjusted
+
+df <- reshape2::melt(df, value.name = "n_dtu", variable.name = "class")
+
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$celltype <- factor(df$celltype, levels = rev(names(color.vec)))
+df$class <- plyr::revalue(df$class, c("Not_Adjusted" = "Not Adjusted"))
+
+# Plot 
+x_lab <- "N Population DTU genes"
+y_lab <- "Cell type"
+
+# Plot 
+plt <- ggplot(data = df, aes(y = celltype, x = n_dtu, fill = celltype, alpha = class)) +
+  geom_bar(stat = "identity", linewidth=0.25) +
+  # geom_bar(data = df, aes(x = Not_Adjusted), stat = "identity", alpha = 0.5,  linewidth=0.25) +
+  # geom_bar(data = df, aes(x = Adjusted),  stat = "identity", alpha = 1, linewidth=0.25) +
+  # geom_text(data = df, aes(x = n_dtu, label = n_dtu), color = "black", size = 3.5/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  # scale_color_manual( values = lineage.color.vec ) +
+  scale_alpha_manual("Cell composition", values = c(0.5, 1)) +
+  xlab(x_lab) + ylab(y_lab) + 
+  plot_theme + theme(axis.title.y = element_blank(), legend.position = c(0.8, 0.45)) + 
+  guides(fill = FALSE,  color = FALSE,  alpha = guide_legend(reverse=F))
+plt
+
+# Save
+file.name <- "02_Plots/06_celltype-fractions/01_01_popDTU-N-DTU-Genes-01_lineage-by-Condtion-Adjusted-vs-No.pdf"
+ggsave(file.name, plt, width = 4.5, height = 5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 4.5, height = 5, units = "cm", bg = "white")
+```
+
+- Get N of corrected genes by cell composition (fraction of reduction)
+```{r}
+dtu1 <- readRDS("01_Processed-Data/05_Filt-1-5-0.8-0.01/01_popDTU-filtered-df.rds") # Model without adjusting for cell composition
+dtu2 <- readRDS("01_Processed-Data/06_celltype-fractions/01_popDTU-filtered-df.rds") # Model adjusting for cell composition
+dtu1 <- dtu1$lineage
+dtu2 <- dtu2$lineage
+
+dtu1 <- dtu1 %>% group_by(celltype, Condition) %>% summarise(n_dtu = n_distinct(gene_id))
+dtu2 <- dtu2 %>% group_by(celltype, Condition) %>% summarise(n_dtu = n_distinct(gene_id))
+
+df <- merge(dtu1, dtu2, by = c("celltype", "Condition"), all = T)
+names(df)[ match(c("n_dtu.x", "n_dtu.y"), names(df))] <- c("Not_Adjusted", "Adjusted")
+
+df$fraction_reduced <- 1- df$Adjusted / df$Not_Adjusted
+df[ which.min(df$fraction_reduced), ]
+df[ which.max(df$fraction_reduced), ]
+# mean reduction across lineages
+df %>% group_by(celltype) %>% summarise(mean_reduction = mean(fraction_reduced), median_reduciton = median(fraction_reduced))
+```
+
+# Fig. 3.C
+
+*Fig. 3. c) Sharing of population DTU genes across immune lineages, considering only genes tested in all lineages within each condition.*
+
+```{r}
+file.name <- "01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu.l <- dtu.l$lineage
+
+dtu.l <- list(
+  NS = lapply(dtu.l, function(x) x[["NS"]]), 
+  IAV = lapply(dtu.l, function(x) x[["IAV"]]), 
+  COV = lapply(dtu.l, function(x) x[["COV"]])
+)
+
+dtu.l <- lapply(dtu.l, function(c){
+  vec = Reduce(intersect, lapply(c, function(x) x$gene_name))
+  lapply(c, function(x) x[x$gene_name %in% vec, ])
+  })
+dtu.l <- lapply(dtu.l, function(c) plyr::ldply(c, .id = "lineage"))
+dtu <- plyr::ldply(dtu.l, .id = "Condition")
+dtu <- dtu[dtu$fdr < 0.05, ] # keep DTU
+
+df <- dtu %>% group_by(Condition, gene_name) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(Condition, n_lineages) %>% summarise(n_genes = n_distinct(gene_name))
+df <- df %>% group_by(Condition) %>% mutate(n_genes_rel = n_genes / sum(n_genes) )
+
+df$n_lineages <- factor(df$n_lineages, levels = c(1:5))
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+
+
+sharing.plt <- ggplot(df, aes(y = n_genes_rel, x = Condition, fill = n_lineages)) + 
+  geom_bar(stat = "identity", color = "black", linewidth = 0.25, position = position_stack(reverse = T)) + 
+   geom_text(data = df[df$n_lineages %in% c("1", "2", "3"), ],  aes(label = round(n_genes_rel, 2)), position = position_stack(vjust = 0.5, reverse = T), 
+                color="black", size=3.5/.pt, angle = 0) + 
+  scale_fill_brewer("N lineages", palette = "Blues") + 
+  ylab("% of population DTU Genes") + 
+  # facet_grid( Condition ~., scales = "free_x", switch = "y") +
+  plot_theme + 
+  theme(axis.title.x = element_blank(), axis.line.x = element_blank(),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 3.5, margin = margin(b = 0)), axis.ticks.x = element_blank(),
+        legend.box.spacing = unit(0.2, "cm"),
+        legend.key.size = unit(0.2, "cm"),
+        legend.title = element_text(size = 5, margin = margin(b = 0, unit = "cm"))
+        )+ 
+  guides(fill = guide_legend(byrow = FALSE, override.aes = list(color = "white", linewidth = 0.15)))
+
+file.name <- "02_Plots/06_celltype-fractions/04_02_popDTU-lineage-sharing-BarPlot-02_by-Condition-02_vertical.pdf"
+ggsave(file.name, sharing.plt, width = 4.5, height = 4, units = "cm")
+```

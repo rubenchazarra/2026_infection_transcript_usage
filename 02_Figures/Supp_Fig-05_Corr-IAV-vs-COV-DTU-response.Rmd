@@ -1,0 +1,90 @@
+---
+title: "03_DTU-DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+
+Code to generate Supplementary Fig. 5. 
+
+- Functions
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/01_infectionDTU/02_DA") # come back to notebook 
+```
+
+# Supp Fig. 5. 
+
+Supplementary Fig. 5. Comparison of transcript usage responses to influenza A virus (IAV) and SARS-CoV-2 (COV) across immune lineages. Each point represents a gene, plotted according to its differential transcript usage (DTU) effect size (MD value) in response to IAV (x-axis) and COV (y-axis) stimulation within each immune lineage. Colors indicate whether genes exhibit infection-associated DTU in response to IAV only, COV only, both viruses, or neither condition (NS).
+
+```{r}
+dtu <- readRDS("01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-unfiltered-df.rds")
+dtu <- dtu$lineage
+dtu$MD <- as.numeric(dtu$MD) # 2025-05-03 BUG!
+# split by Condition
+dtu.l <- split(dtu, dtu$Condition)
+# keep viral responses
+dtu.l <- dtu.l[c("IAV.NS", "COV.NS")]
+select.cols <- c("celltype", "Condition", "gene_id", "gene_name", "MD", "fdr")
+dtu.l <- lapply(dtu.l, function(x) x [, select.cols ] )
+df <- merge(dtu.l[[1]], dtu.l[[2]], by = c("celltype",  "gene_id", "gene_name"), all = F)
+# classify cases
+df$class <- NA
+df[df$fdr.x < 0.05 & df$fdr.y < 0.05,  "class"] <- "Both"
+df[df$fdr.x < 0.05 & df$fdr.y >= 0.05, "class"] <- "IAV"
+df[df$fdr.x >= 0.05 & df$fdr.y < 0.05, "class"] <- "COV"
+df[df$fdr.x >= 0.05 & df$fdr.y >= 0.05,"class"] <- "NS"
+# print corr
+cor_summary <- df %>%
+  group_by(celltype) %>%
+  summarise(
+    r = cor(MD.x, MD.y, use = "complete.obs"),
+    p_value = cor.test(MD.x, MD.y, method = "pearson")$p.value,
+    .groups = "drop"
+  )
+cor_summary
+# 
+cor.test( df[!df$celltype %in% "MONO", "MD.x"], df[!df$celltype %in% "MONO", "MD.y"])
+
+# Plot 
+df$celltype <- factor(df$celltype, levels =  lineage.df$lineage)
+model <- "dtu ~ Run + Mortality+ Age + POP"
+color.vec <- c("NS" = "grey", "IAV" = "#75A9D1", "COV"= "#c1121f", "Both" = "#001F54")
+# color.vec <- c("NS" = "grey", "IAV" = "#75A9D1", "COV"= "#c1121f", "Both" = "#f1faee")
+
+# Plot 
+tit <- "MD correlation"
+sub_tit <- model # "Anquino2023"
+x_lab <- "MD (IAV - Baseline)"
+x_lab <- "TU effect size (IAV-Baseline)"
+y_lab <- "MD (COV - Baseline)"
+y_lab <- "TU effect size (COV-Baseline)"
+
+# Plot 
+plt <- ggplot(data = df, aes(x = MD.x, y = MD.y, color = class )) +
+  xlim(0, 0.5) + ylim(0, 0.5) + 
+  # tested
+  geom_point(data = df[df$class == "NS", ], shape = 20, size = 0.05, alpha = 1)  + 
+  geom_point(data = df[df$class != "NS", ], shape = 20, size = 0.05, alpha = 1)  + 
+  # Add correlation test only for significant points # 2025-05-03 We don't want the correlation now
+  # ggpubr::stat_cor(data =  df, method = "spearman", # for all the points
+  #          label.x.npc = "left", label.y.npc = "top", color = "black", size = 3) + 
+  facet_grid(  ~ celltype ) +
+  scale_color_manual( values = color.vec ) +
+  scale_x_continuous(breaks = c(0, 0.2, 0.4)) + 
+  scale_y_continuous(breaks = c(0, 0.2, 0.4)) + 
+  labs(title = tit, subtitle = sub_tit) + xlab(x_lab) + ylab(y_lab) + 
+  plot_theme + theme( axis.text.x = element_text(size = 5, angle = 90, vjust = 0.5)) + 
+  guides(fill = FALSE, alpha=FALSE, 
+         color=guide_legend( override.aes = list(label = "", size = 1, ncol=1),  reverse = T)) 
+
+plt
+# save
+file.name <- "02_Plots/05_Filt-1-5-0.8-0.01/01_06_03_infectionDTU-MD-IAV-vs-COV.pdf" ## Supplementary Fig. 5. 
+ggsave(file.name, plt, width = 14, height = 4, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 14, height = 4, units = "cm", bg = "white")
+```

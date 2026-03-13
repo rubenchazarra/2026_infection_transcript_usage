@@ -1,0 +1,126 @@
+---
+title: "03_DTU-DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+
+- Infection DTU Data Analysis
+
+Code to generate Supplementary Figure 7. A and B
+
+- Functions
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/01_infectionDTU/02_DA") # come back to notebook 
+```
+
+# Supp Fig. 7.A 
+*Requires edits because we are not finally doing __dodge__*
+
+*Stratify DTU genes by DGE upregulated and DTU Downregulated*
+
+```{r}
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-filtered-df.rds"
+dtu.l <- readRDS(file.name)
+dtu <- dtu.l$lineage
+dtu[is.na(dtu$DGE.direction), "DGE.direction"] <- "DTU not DGE"
+df <- dtu %>% group_by(celltype, Condition, DGE.direction) %>% summarise(n_dtu = n_distinct(gene_id))
+df <- df[df$Condition %in% c("IAV.NS", "COV.NS"), ]
+#
+df$Condition <- factor(df$Condition, levels = names(condition.pairwise.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$celltype <- factor(df$celltype, levels = rev(names(color.vec)))
+dge.vec <- c("DTU not DGE" = "DTU not DGE",  "Up" = "DTU & DGE-Up", "Down" = "DTU & DGE-Down")
+df$DGE.direction <- factor(df$DGE.direction, levels = rev(names(dge.vec)))
+
+# Plot 
+tit <- "Infection DTU overlap DGE"
+model <- "dtu ~ Run + Mortality+ Age + POP"
+sub_tit <- model
+x_lab <- "N infection DTU genes"
+y_lab <- "Cell type"
+
+# Plot 
+plt <- ggplot(data = df, aes(x = n_dtu, y = celltype, fill = celltype, alpha = DGE.direction)) + #, group = DGE.direction)) +
+  # geom_bar(aes(group = DGE.direction),  stat= "identity", linewidth=0.25) +  # for one bar
+  geom_bar(stat= "identity", linewidth=0.25, position=position_dodge()) +  # one bar per category
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_alpha_manual("", values = c(0.5, 0.75, 1), labels = dge.vec) +
+  # geom_text(data = df, aes(x = n_dtu, label = n_dtu), alpha = 1, color = "black", size = 4/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  # geom_text(data = df, aes(x = n_dtu, label = n_dtu), alpha = 1, color = "black", size = 4/.pt, hjust = 0.5, position = position_dodge())+
+  labs(title = tit, subtitle = sub_tit) + xlab(x_lab) + ylab(y_lab) + 
+  plot_theme + 
+  theme(plot.title = element_blank(), axis.title.y = element_blank(), 
+        axis.title.x = element_text(size = 6), 
+       # legend.position = c(0.75, 0.55), legend.box = "vertical",
+        legend.key.size = unit(0.2, "cm")) + 
+  guides(fill = FALSE, color = FALSE, 
+         alpha=guide_legend( override.aes = list(label = "", ncol=1), reverse = T, label.position = "right"))
+
+plt
+# Save
+file.name <- "02_Plots/05_Filt-1-5-0.8-0.01/01_03_infectionDTU-DGE-Up-Down-01_lineage-by-Condition-absolute-position_dodge.pdf"
+ggsave(file.name, plt, width = 6, height = 5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 6, height = 5, units = "cm", bg = "white")
+```
+
+# Supp Fig. 7.B
+
+- Test
+```{r}
+dtu.l <- readRDS("01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-unfiltered-list.rds")
+dtu <- dtu.l$lineage
+
+dge.l <- readRDS("../../../../01_DGE/01_infectionDGE/02_DA/01_Processed-Data/05_include-Library/01_infectionDGE-unfiltered-list.rds")
+dge.l <- select.df.from.nested.list(dge.l, df.name = "Condition") # TODO: this in DGE DA
+dge <- dge.l$lineage
+
+overlap.l <- test.overlap.pro(dtu, dge, 
+                 fdr.col.1 = "fdr", fdr.thres.1 = 0.05, gene.col.1 = "gene_id", FC.col.1 =NA, FC.thres.1 = NA,  
+                 fdr.col.2 = "fdr", fdr.thres.2 = 0.01, gene.col.2 = "genes", FC.col.2 = "betas", FC.thres.2 = 0.5)
+# merge
+overlap.l <- lapply(overlap.l, function(ct) plyr::ldply(ct, .id = "Condition"))
+overlap.df <- plyr::ldply(overlap.l, .id = "celltype")
+overlap.df <- overlap.df[overlap.df$Condition %in% c("IAV.NS", "COV.NS"), ]
+overlap.df$fdr <- p.adjust(overlap.df$p_value)
+
+# Min OR
+overlap.df[ which.min(overlap.df$odds.ratio), ]
+# Max p_value
+overlap.df[ which.max(overlap.df$fdr), ]
+
+# Plot OR
+df <- overlap.df
+df <- add.p_value.label(df)
+df$Condition <- factor(df$Condition, levels = names(condition.pairwise.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+df$celltype <- factor(df$celltype, levels = rev(lineage.df$lineage))
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$DGE.direction <- factor(df$DGE.direction, levels = c("All", "Up", "Down"))
+
+plt <- ggplot(data = df, aes(x = odds.ratio, y = celltype, color= celltype)) + 
+  xlim(0, 20) + 
+  geom_point(size = 2/.pt, position = position_dodge(width = 1)) + 
+  geom_text(aes(label = p_value_label), position = position_dodge(width = 1), color = "black", hjust =0.5, vjust =0.5, size = 3.5/.pt) + 
+  geom_vline(aes(xintercept = 1), size = .25, linetype = "dashed", position = position_dodge(width = 1), 
+             linewidth = 0.25) +
+  geom_errorbarh(aes(xmax = conf.int.upper, xmin = conf.int.lower), size = .5, height = .5,  linewidth = 0.25,
+                 position = position_dodge(width = 1)) + 
+  scale_color_manual(guide = "none", values = lineage.color.vec) + 
+  facet_grid( Condition ~ ., switch = "y" ) + 
+  labs(title = "tit", subtitle = "sub_tit") + ylab("y_lab") + xlab("Odds Ratio") + 
+  plot_theme + theme(axis.title.y = element_blank())
+
+# Save
+file.name<- "02_Plots/05_Filt-1-5-0.8-0.01/01_03_infectionDTU-DTU-DGE-OddsRatio.pdf"
+ggsave(file.name, plt, width = 3, height = 5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 3, height = 5, units = "cm", bg = "white")
+```

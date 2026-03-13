@@ -1,0 +1,165 @@
+---
+title: "N-iso-gene"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+- Plotting Supplementary Fig. 3 which includes: 
+- A) Number of infection Differentially Expressed Genes (FDR<0.01) stratified by log2 fold change
+- B) Corresponding "cell EC diversity" metric, defined as the mean number of expressed ECs (count > 0) per gene in each cell, restricting the analysis to genes with at least two annotated transcripts, for *different sets of infection DEGs stratified by log2 fold change quantiles*
+
+*Note 1: infection Differentially Expressed Genes are calculated in ../01_Analysis/02_01_infectionDEG.R*
+
+
+# Load functions
+```{r}
+source("../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../01_Randolph2021/05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../04_EC-charac/08_Tx-diversity/")
+```
+
+# 1. Plots 
+
+## 1.1 Plot N of infection DEGs per lineage and response (Supplementary Fig. 3.A)
+```{r}
+dge.l <- readRDS("../../03_Differential/01_DGE/01_infectionDGE/02_DA/01_Processed-Data/05_include-Library/01_infectionDGE-unfiltered-list.rds") # This is the output of infection DGE analysis without filtering any gene 
+dge.l <- lapply(dge.l, function(ct) lapply(ct, function(cond) plyr::ldply(cond, .id = "FC_interval") )) # merge by log2FC interval
+dge.l <- lapply(dge.l, function(ct) plyr::ldply(ct, .id = "Condition")) # merge by "Condition", this is, response (either IAV vs Baseline or COV vs Baseline)
+df <- plyr::ldply(dge.l, .id = "lineage") # merge by immune lineage
+df <- df %>% group_by(lineage, Condition, FC_interval) %>% summarise(n_genes = n_distinct(gene_id))
+df$lineage <- factor(df$lineage, levels = lineage.df$lineage)
+df$Condition <- factor(df$Condition, levels = names(condition.pairwise.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+df$FC_interval <- factor(df$FC_interval , c("NS", "[-Inf,-1]", "(-1,-0.5]", "(-0.5,0]", "(0,0.5]", "(0.5,1]", "(1, Inf]"))
+df$FC_interval <- plyr::revalue(df$FC_interval , c("NS", "[-Inf,-1]" = "<-1",  "(1, Inf]" = ">1"))
+
+plt <- ggplot(df, aes(y = FC_interval, x = n_genes, fill = lineage )) +
+  geom_bar(stat = "identity", position = position_stack(reverse =T)) + 
+  scale_fill_manual("", values = lineage.color.vec) + 
+  facet_grid(Condition ~ ., switch = "y") + 
+  ylab("DE log2 FC") + xlab("N infection DEG") + 
+  labs(title = "", subtitle = "Infection DEG (FDR < 0.01)") +
+  plot_theme + theme(# plot.title = element_text(size = 7), plot.subtitle = element_text(size = 7),
+                     # axis.title.y = element_blank()
+    legend.position = "bottom", 
+    legend.key.spacing.x = unit(0.1, "cm"),
+    ) + 
+    guides( fill=guide_legend( override.aes = list(label = "", size = 1, nrow=1)))
+
+plt
+file.name <- "02_Plots/04_03_Tx-diversity-by-infectionDGE-02_by-FC-N-genes.pdf" # Supplementary Fig 3.A
+ggsave(file.name, plt, width = 6, height = 7, units = "cm")
+```
+
+
+## 1.2 Cell EC diversity stratified by log2FC quantiles 
+
+*Note 2:in this figures EC diversity is NOT calculated calculated in ../01_Analysis/01_Calculate-cell-EC-diversity-metric.R. Instead, the code to calculate it is below*
+
+- Select genes with >1 Tx annotated in our annotation
+```{r}
+tx2gene <- read.table("../../01_Quantif/00_IndexData/02_GENCODEv42_filt-IAV-SARS_Cov_2-tx2gene-with-ENS.tsv",  sep = "\t", header = T)
+tx.count <- tx2gene %>% group_by(gene_id, gene_name) %>% summarise (n_transcript_id = n_distinct(transcript_id), n_transcript_name = n_distinct(transcript_name))
+genes.more.1.tx <- tx.count[ tx.count$n_transcript_id > 1, "gene_id", drop = T]
+```
+
+- Compute "cell EC diversity" metric, defined as the mean number of expressed ECs (count > 0) per gene in each cell stratifying genes by infection DEG fold change, and include non infection DEG
+```{r}
+# DEG
+dge.l <- readRDS("../../03_Differential/01_DGE/01_infectionDGE/02_DA/01_Processed-Data/05_include-Library/01_infectionDGE-unfiltered-list.rds")
+dge.l <- dge.l$lineage
+dge.l <- lapply(dge.l, function(x) x[c("COV.NS", "IAV.NS") ])
+# remove DEGs with 1 Tx annotated (hence a single EC)
+dge.l <- lapply(dge.l, function(ct) lapply(ct, function(cond) cond[cond$gene_id %in% intersect(cond$gene_id, genes.more.1.tx), ]))
+
+## Create quantiles for by FC
+dge.l <- lapply(dge.l, function(ct) lapply(ct, function(dge) {
+  dge$FC_interval <- cut(dge$betas, breaks =  c(-Inf, -1, -0.5, 0, 0.5, 1, Inf), 
+                         right = TRUE, include.lowest = TRUE)
+  dge$FC_interval <- as.character(dge$FC_interval)
+  dge[dge$fdr > 0.01, "FC_interval"] <- "NS"
+  split.dge <- split(dge, dge$FC_interval)
+  split.dge
+}))
+
+# Seurat list with N of ECs expressed per gene per cell 
+seu.l <- read.RDS.files("00_Raw-Data/01_N-ECs-gene/01_lineage/", pattern = ".rds")
+seu.l <- group_by_Condition_pairwise(seu.l)
+seu.l <- lapply(seu.l, function(l) l[ c("COV.NS", "IAV.NS") ])
+seu.l <- seu.l[ match(names(dge.l), names(seu.l))]
+
+# Subset Seurat objects by DEG FC division  
+l <- lapply( names(dge.l), function(ct_name)  lapply(names( dge.l[[ct_name]] ), function(cond_name){
+  dge <- dge.l[[ ct_name ]][[ cond_name ]]
+  seu <- seu.l[[ ct_name ]][[ cond_name ]]
+  # iterate across Quantiles 
+  l <- lapply(dge, function(dge.split){ # iterate across FC splits
+    print(dim(dge.split))
+    lapply(seu, function(seu){ # Iterate across cells of different Condition
+      genes <- dge.split$gene_id # Subset # BUG --> We are not subsetting by genes > 1 Tx annotated 
+      mat <- seu[genes, ]@assays$RNA@layers$counts
+      mean.n.ec.gene.cell <- colSums(mat) / colSums(mat > 0 ) 
+      df <- seu@meta.data [, c("Library_Barcode", "Condition", "POP") ]
+      df[["mean_n_ec_gene_cell"]] <- mean.n.ec.gene.cell
+      df
+    })
+  })
+  l
+}))
+l <- lapply(l, function(ct) setNames(ct, nm = names(seu.l$B))) # add names back
+l <- setNames(l, nm = names(seu.l))
+
+# Merge 
+l <- lapply(l, function(ct) lapply(ct, function(cond) lapply(cond, function(dir) data.table::rbindlist(dir) ))) # Condition cells 
+l <- lapply(l, function(ct) lapply(ct, function(cond) plyr::ldply(cond, .id = "FC_interval"))) # FC interval
+l <- lapply(l, function(ct) plyr::ldply(ct, .id = "DEG.comparison")) # DEG comparison
+df <- plyr::ldply(l, .id = "lineage")
+saveRDS(df, "01_Processed-Data/01_03_N-ECs-per-gene-cell-by-infectionDEG-by-FC.rds")
+```
+
+- Plot cell EC diversity values
+```{r}
+# Plot Mean N of ECs per gene per cell
+df <- readRDS("01_Processed-Data/01_03_N-ECs-per-gene-cell-by-infectionDEG-by-FC.rds")
+color.vec <- lineage.color.vec
+df$lineage <- factor(df$lineage, levels = lineage.df$lineage)
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+df$DEG.comparison <- factor(df$DEG.comparison, names(condition.pairwise.vec.short))
+df$DEG.comparison <- plyr::revalue(df$DEG.comparison, condition.pairwise.vec.short)
+df$FC_interval <- factor(df$FC_interval , c("NS", "[-Inf,-1]", "(-1,-0.5]", "(-0.5,0]", "(0,0.5]", "(0.5,1]", "(1, Inf]"))
+df$FC_interval <- plyr::revalue(df$FC_interval , c("[-Inf,-1]" = "<-1",  "(1, Inf]" = ">1"))
+
+# calculate P values
+stats.df <- df %>%  group_by(lineage, FC_interval) %>% summarise(
+  "COV-Baseline" = wilcox.test(mean_n_ec_gene_cell[Condition == "COV"], mean_n_ec_gene_cell[Condition == "Baseline"])$p.value,
+  "IAV-Baseline" = wilcox.test(mean_n_ec_gene_cell[Condition == "IAV"], mean_n_ec_gene_cell[Condition == "Baseline"])$p.value, .groups = "drop"
+  )
+stats.df <- reshape2::melt(stats.df, variable.name = "DEG.comparison", value.name = "p_value")
+stats.df <- add.p_value.label(stats.df)
+stats.df$group1 <- gsub("-.*", "", stats.df$DEG.comparison)
+stats.df$group2 <-  gsub(".*-", "", stats.df$DEG.comparison)
+stats.df$y.position <- 1.5
+  
+plt <- ggplot(df, aes(y = FC_interval, x = mean_n_ec_gene_cell, fill = Condition)) +
+  geom_boxplot( aes(fill = Condition), outlier.colour = "grey50", outlier.size = 0.25,
+                outliers = FALSE, linewidth=0.25) +
+  scale_fill_manual("Cells", values = condition.color.vec.short) + 
+  facet_grid(DEG.comparison ~ lineage, switch = "y") + 
+  # ggpubr::stat_pvalue_manual(data = stats.df, label = "p_value_label", y.position = "y.position", 
+  #                            xmin = "group1", xmax = "group2", tip.length = 0.01, 
+  #                            coord.flip = TRUE) +
+  ylab("DE log2 FC") + xlab("Cell EC diversity (Mean N of ECs expressed / gene / cell)") + 
+  labs(title = "Tx diversity stratify per DGE for genes > 1 Tx annot", subtitle = "Infection DEG") + 
+  plot_theme + theme(# plot.title = element_text(size = 7), plot.subtitle = element_text(size = 7),
+                     # axis.title.y = element_blank()
+    ) + 
+  guides(alpha=guide_legend( override.aes = list(label = "", size = 1, ncol=1, fill = "grey")))
+plt
+
+file.name <- "02_Plots/04_03_Tx-diversity-by-infectionDGE-02_by-FC.pdf"
+ggsave(file.name, plt, width = 10, height = 7, units = "cm")
+```

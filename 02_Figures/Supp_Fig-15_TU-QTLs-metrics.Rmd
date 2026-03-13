@@ -1,0 +1,684 @@
+---
+title: "01_DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal
+
+Supplementary Fig. 15. Summary of tested genetic variants and genes in transcript usage quantitative trait loci (TU-QTL) across immune lineages and conditions. From left to right, number of tested genetic variants (single nucleotide polimorphisms; SNP); number of significant TU-QTLs, number of tested genes, and number of genes with a significant TU-QTL across immune lineages and conditions.
+
+
+- Load funcitons
+```{r}
+source("../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../01_Randolph2021/05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../06_sQTL/03_DA/")
+```
+
+# Supp. Fig. 15
+
+*Plot N of tested genes, SNPs, and N of significant genes, SNPs*
+
+```{r}
+## 1. N of tested variants
+df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-df.rds")
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_snps = n_distinct(snpId))
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+df$lineage <- factor(df$lineage, levels = rev(names(lineage.color.vec)))
+
+# Plot 
+plt.1 <- ggplot(data = df, aes(x = n_snps, y = lineage, fill = lineage, color = lineage)) +
+  geom_bar(stat= "identity", linewidth=0.25) + 
+  geom_text(data = df, aes(x = n_snps, label = n_snps), color = "black",  size = 5/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_color_manual( values = lineage.color.vec ) +
+  xlab("N Tested SNPs") + 
+  plot_theme + theme(axis.title.y = element_blank()) +  guides(fill = FALSE,  color = FALSE )
+
+## 2. N of significant variants
+df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_snps = n_distinct(snpId))
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+df$lineage <- factor(df$lineage, levels = rev(names(lineage.color.vec)))
+
+# Plot 
+plt.2 <- ggplot(data = df, aes(x = n_snps, y = lineage, fill = lineage, color = lineage)) +
+  geom_bar(stat= "identity", linewidth=0.25) + 
+  geom_text(data = df, aes(x = n_snps, label = n_snps), color = "black",  size = 5/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_color_manual( values = lineage.color.vec ) +
+  xlab("N of TU-QTLs") + 
+  plot_theme + theme(axis.title.y = element_blank()) + guides(fill = FALSE,  color = FALSE )
+
+## 3. N Tested Genes and variants
+df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-df.rds")
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_genes = n_distinct(geneId))
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+df$lineage <- factor(df$lineage, levels = rev(names(lineage.color.vec)))
+
+# Plot 
+plt.3 <- ggplot(data = df, aes(x = n_genes, y = lineage, fill = lineage, color = lineage)) +
+  geom_bar(stat= "identity", linewidth=0.25) + 
+  geom_text(data = df, aes(x = n_genes, label = n_genes), color = "black",  size = 5/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_color_manual( values = lineage.color.vec ) +
+  xlab("N Tested Genes") + 
+  plot_theme + theme(axis.title.y = element_blank()) +  guides(fill = FALSE,  color = FALSE )
+
+## 4. N significant genes
+df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_genes = n_distinct(geneId))
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+df$lineage <- factor(df$lineage, levels = rev(names(lineage.color.vec)))
+
+# Plot 
+plt.4 <- ggplot(data = df, aes(x = n_genes, y = lineage, fill = lineage, color = lineage)) +
+  geom_bar(stat= "identity", linewidth=0.25) + 
+  geom_text(data = df, aes(x = n_genes, label = n_genes), color = "black",  size = 5/.pt, hjust = 0.5, position = position_stack(vjust = .5)) +
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_color_manual( values = lineage.color.vec ) +
+  xlab("N Genes with a TU-QTL") + 
+  plot_theme + theme(axis.title.y = element_blank()) +  guides(fill = FALSE,  color = FALSE )
+
+## Merge plots
+plt <- cowplot::plot_grid(
+  plt.1, 
+  plt.2 + theme(strip.text.y = element_blank(), strip.background = element_blank(),
+                axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.line.y = element_blank()),
+  plt.3 + theme(strip.text.y = element_blank(), strip.background = element_blank(),
+               axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.line.y = element_blank()),
+  plt.4 + theme(strip.text.y = element_blank(), strip.background = element_blank(),
+                axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.line.y = element_blank()),
+    nrow = 1, align = "h", axis = "tb" , rel_widths =  c(0.3, 0.23, 0.23, 0.24)
+    )
+
+file.name <- "02_Plots/03_celltype-fractions/01_06_01_Tested-and-significants-genes-and-variants.pdf"
+ggsave(file.name, plt, width = 12, height = 6, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 12, height = 5, units = "cm", bg = "white")
+```
+
+
+# Supp. Fig 17.A 
+
+*Plot % popDTU genes with a TU-QTL when stratifying popDTU by MD*
+
+```{r}
+# TU QTLs
+qtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+select.qtl <- c("lineage", "Condition", "geneId", "gene_name", "snpId", "best.snp", "md", "fdr")
+qtl <- qtl[, select.qtl]
+# Keep best, we only want to know if a popDTU has at least one TU-QTL
+qtl <- qtl[qtl$snpId == qtl$best.snp, ]
+
+# Pop DTU
+dtu <- readRDS("../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-filtered-df.rds")
+dtu <- dtu$lineage
+select.dtu <- c("celltype", "Condition", "gene_id", "gene_name", "MD", "fdr")
+dtu <- dtu[, select.dtu ]
+dtu$MD <- as.numeric(dtu$MD)
+# Add MD Quantiles by lineage-Condition 
+dtu$celltype_Condition <- paste0(dtu$celltype, "_", dtu$Condition)
+dtu.l <- split(dtu, dtu$celltype_Condition)
+dtu.l <- lapply(dtu.l, function(x){
+  q.vec =  quantile(x$MD, probs = seq(0, 1, 0.25), include_lowest  = T)
+  x$MD_quantile <-  cut(x$MD, breaks = q.vec, labels = paste0("Q", c(1:4)),  include.lowest= T)
+  x
+})
+dtu <- data.table::rbindlist(dtu.l)
+
+# Merge
+df <- merge(dtu, qtl,
+            by.x = c("celltype", "Condition", "gene_id", "gene_name"), 
+            by.y = c("lineage", "Condition", "geneId", "gene_name"), 
+            all.x = T, all.y = F)
+# Label genes with
+df$is.QTL <- ifelse(is.na(df$snpId), FALSE, TRUE)
+
+# Stratify popDTU by MD
+df <- df %>% group_by(celltype, Condition, MD_quantile) %>% summarise(n_genes_qtl = sum(is.QTL == "TRUE"),
+                                                                      n_genes = n_distinct(gene_id))
+df$n_genes_qtl_rel  = df$n_genes_qtl / df$n_genes
+
+# Plot
+df$bar_label <- paste0(df$n_genes_qtl, "/", df$n_genes)
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$celltype <- factor(df$celltype, levels = rev(names(color.vec)))
+df$MD_quantile <- factor(df$MD_quantile, levels = rev(c("Q1", "Q2", "Q3", "Q4")))
+alpha.vec <- c("Q1" = "Very Low", "Q2" = "Low", "Q3" = "Mid", "Q4" = "High")
+
+# Plotce
+plt <- ggplot(data = df, aes(y = celltype, x = n_genes_qtl_rel, fill = celltype)) +
+  geom_bar( data = df, aes(alpha = MD_quantile), stat = "identity", linewidth=0.25, width = 0.8, position_dodge( width=0.8 )) +
+  geom_text(aes(x = n_genes_qtl_rel, label = bar_label, group = MD_quantile ),
+            alpha = 1, color = "black", size = 3/.pt, hjust = -0.1, vjust = 0.5, position = position_dodge( width=0.8 )) +
+  facet_grid(Condition ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_fill_manual( values = lineage.color.vec ) +
+  scale_alpha_manual("Effect size", values = rev(c(0.4, 0.6, 0.8, 1)), labels = alpha.vec) +
+  xlab("PopDTU genes with a TU-QTL (%)") + ylab("y_lab") + 
+  plot_theme + theme(axis.title.y = element_blank(), 
+                     legend.position=c(0.86, 0.5)) + 
+  guides(fill = FALSE, color = FALSE, alpha = guide_legend(reverse = T))
+plt
+
+# Save
+file.name <- paste0("02_Plots/03_celltype-fractions/03_03_PopDTU-fraction-with-QTL-stratified-by-MD_01.pdf")
+ggsave(file.name, plt, width = 5.5, height = 7, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 5.5, height = 7, units = "cm", bg = "white")
+```
+
+
+# Supp. Fig 17.B 
+
+*Compare effect sizes (MDs) of population DTU genes vs TU-QTLs* 
+
+```{r}
+# TU QTLs
+qtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+# maybe we could select best SNP
+select.qtl <- c("lineage", "Condition", "geneId", "gene_name", "snpId", "best.snp", "md", "fdr")
+qtl <- qtl[, select.qtl]
+
+# Pop DTU
+dtu <- readRDS("../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-filtered-df.rds")
+dtu <- dtu$lineage
+select.dtu <- c("celltype", "Condition", "gene_id", "gene_name", "MD", "fdr")
+dtu <- dtu[, select.dtu ]
+dtu$MD <- as.numeric(dtu$MD)
+
+df <- merge(dtu, qtl,
+             by.x = c("celltype", "Condition", "gene_id", "gene_name"), 
+             by.y = c("lineage", "Condition", "geneId", "gene_name"), 
+             all.x = T, all.y = F)
+
+# some sQTLseekeR2 md values are NA, remove
+df <- df[!is.na(df$md), ]
+
+# Select best SNP 
+# df <- df[df$snpId == df$best.snp,  ]
+
+# Plot 
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short) )
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+color.vec <- setNames(lineage.df$color, nm = lineage.df$lineage)
+df$celltype <- factor(df$celltype, levels = lineage.df$lineage)
+
+plt <- ggplot(data = df, aes(x = md, y = MD, color = celltype )) +
+  # xlim(0, 0.5) + ylim(0, 0.5) + 
+  geom_point(shape = 20, size = 0.05, alpha = 1)  + 
+  geom_smooth(aes(fill = celltype), method = "lm", size = 0.5) +  # Add trend line
+  ggpubr::stat_cor(aes(color = celltype), method = "spearman", # for all the points
+                   label.x = 0, label.y = 0.2, size = 1.5) +
+  facet_grid(  Condition ~ celltype, switch = "y") +
+  scale_color_manual( "", values = lineage.color.vec ) +
+  scale_fill_manual( "", values = lineage.color.vec ) +
+  # scale_x_continuous(breaks = c(0, 0.2, 0.4)) + 
+  # scale_y_continuous(breaks = c(0, 0.2, 0.4)) + 
+  labs(title = "tit", subtitle = "sub_tit") + xlab("Population DTU gene MD value") + ylab("TU-QTL MD value") + 
+  plot_theme + 
+  guides( fill = FALSE, color = FALSE)
+plt
+file.name <- paste0("02_Plots/03_celltype-fractions/03_02_MD-corr-TU-QTL-PopDTU_01.pdf")
+ggsave(file.name, plt, width = 11, height = 7, units = "cm")
+file.name <- gsub(".pdf", ".svg",  file.name)
+ggsave(file.name, plt, width = 11, height = 7, units = "cm", bg = "white")
+```
+
+
+# Supp Fig. 18. A
+
+*Lineage Sharing*
+```{r}
+file.name <- "../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu.l <- dtu.l$lineage
+
+dtu.l <- list(
+  NS = lapply(dtu.l, function(x) x[["NS"]]), 
+  IAV = lapply(dtu.l, function(x) x[["IAV"]]), 
+  COV = lapply(dtu.l, function(x) x[["COV"]])
+)
+
+dtu.l <- lapply(dtu.l, function(c){
+  vec = Reduce(intersect, lapply(c, function(x) x$gene_name))
+  lapply(c, function(x) x[x$gene_name %in% vec, ])
+  })
+dtu.l <- lapply(dtu.l, function(c) plyr::ldply(c, .id = "lineage"))
+dtu <- plyr::ldply(dtu.l, .id = "Condition")
+dtu <- dtu[dtu$fdr < 0.05, ] # keep DTU
+
+## Merge with QTLs
+qtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+qtl$is.QTL <- "TRUE"
+qtl <- unique(qtl[, c("lineage", "Condition", "gene_name", "is.QTL")])
+dtu <- merge(dtu, qtl, by = c("lineage", "Condition", "gene_name"), all.x = T, all.y = F)
+dtu[is.na(dtu$is.QTL), "is.QTL"] <- "FALSE"
+dtu$is.QTL <- plyr::revalue(dtu$is.QTL, c("TRUE" = "popDTU with TU-QTL", "FALSE" = "popDTU without TU-QTL"))
+
+# Count sharing
+df <- dtu %>% group_by(Condition, is.QTL, gene_name) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(Condition, is.QTL, n_lineages) %>% summarise(n_genes = n_distinct(gene_name))
+df <- df %>% group_by(Condition, is.QTL) %>% mutate(n_genes_rel = n_genes / sum(n_genes) )
+
+df$n_lineages <- factor(df$n_lineages, levels = c(1:5))
+df$Condition <- factor(df$Condition, levels = rev(names(condition.vec.short)))
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+
+plt <- ggplot(df, aes(x = n_genes_rel, y = Condition, fill = n_lineages)) + 
+  geom_bar(stat = "identity", color = "black", linewidth = 0.25, position = position_stack(reverse = T)) + 
+   geom_text(data = df[df$n_lineages %in% c("1", "2", "3"), ],  aes(label = round(n_genes_rel, 2)), 
+             position = position_stack(vjust = 0.5, reverse = T), color="black", size=3.5/.pt, angle = 90) + 
+  scale_fill_brewer("N lineages", palette = "Blues") + 
+  xlab("% of population DTU Genes") + 
+  facet_grid(  ~is.QTL, switch = "y") +
+  plot_theme + 
+  theme(axis.title.y = element_blank(), 
+        legend.box.spacing = unit(0.2, "cm"), legend.key.size = unit(0.2, "cm"),
+        legend.title = element_text(size = 5, margin = margin(b = 0, unit = "cm"))
+        )+ 
+  guides(fill = guide_legend(byrow = FALSE, override.aes = list(color = "white", linewidth = 0.15)))
+
+file.name <- "02_Plots/03_celltype-fractions/03_04_02_popDTU-lineage-sharing-with-or-without-QTL.pdf"
+ggsave(file.name, plt, width = 10.5, height =5, units = "cm")
+```
+
+# Supp Fig. 18. B
+*Condition sharing*
+```{r}
+file.name <- "../../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu.l <- dtu.l$lineage
+
+dtu.l <- lapply(dtu.l, function(ct){
+  vec = Reduce(intersect, lapply(ct, function(x) x$gene_name))
+  lapply(ct, function(x) x[x$gene_name %in% vec, ])
+  })
+dtu.l <- lapply(dtu.l, function(ct) plyr::ldply(ct, .id = "Condition"))
+dtu <- plyr::ldply(dtu.l, .id = "lineage")
+dtu <- dtu[dtu$fdr < 0.05, ] # keep DTU
+
+## Merge with QTLs
+qtl <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+qtl$is.QTL <- "TRUE"
+qtl <- unique(qtl[, c("lineage", "Condition", "gene_name", "is.QTL")])
+dtu <- merge(dtu, qtl, by = c("lineage", "Condition", "gene_name"), all.x = T, all.y = F)
+dtu[is.na(dtu$is.QTL), "is.QTL"] <- "FALSE"
+dtu$is.QTL <- plyr::revalue(dtu$is.QTL, c("TRUE" = "popDTU with TU-QTL", "FALSE" = "popDTU without TU-QTL"))
+
+df <- dtu %>% group_by(lineage, is.QTL, gene_name) %>% summarise(n_conditions = n_distinct(Condition), Condition = paste(Condition, collapse = ","))
+df <- df %>% group_by(lineage, is.QTL, Condition) %>% summarise(n_genes = n_distinct(gene_name))
+df <- df %>% group_by(lineage, is.QTL) %>% mutate(n_genes_rel = n_genes /sum(n_genes))
+
+df$Condition <- plyr::revalue(df$Condition, c("NS" = "Baseline", 
+                                              "COV,NS" = "Baseline,COV", "IAV,NS" = "Baseline,IAV", 
+                                              "COV,IAV" = "IAV,COV", "COV,IAV,NS" = "All"))
+
+df$Condition <- factor(df$Condition, levels = c("Baseline", "IAV", "COV","Baseline,IAV","Baseline,COV", 
+                                                "IAV,COV", "All"))
+df$lineage <- factor(df$lineage, levels = rev(lineage.df$lineage))
+color.vec <- c("Baseline" = "#edf2f4", "IAV" = "#75A9D1", "COV" = "#c1121f", 
+               "Baseline,COV" = "#780000", "Baseline,IAV" = "#003049", 
+               "IAV,COV" = "#ffb41f", "All" = "#fdf0d5")
+
+plt <- ggplot(df, aes(y = lineage, x = n_genes_rel, fill = Condition)) + 
+  geom_bar(width=0.8, stat = "identity", #color = "white", 
+           linewidth = 0.25, position = position_stack(reverse = T)) + 
+  geom_text(aes(label = round(n_genes_rel, 2)), position = position_stack(vjust = 0.5, reverse = T),
+            color="black", alpha = 1, size=3/.pt, angle = 90) +
+  scale_fill_manual(values = color.vec ) +
+  xlab("% of Population DTU Genes") + 
+  facet_grid(   ~is.QTL , scales = "free_x", switch = "y") +
+  plot_theme  + theme(axis.title.y = element_blank(), axis.line.y = element_blank())
+plt
+
+file.name <- "02_Plots/03_celltype-fractions/03_04_03_popDTU-Condition-sharing-with-or-without-QTL.pdf"
+ggsave(file.name, plt, width = 10.5, height = 5, units = "cm")
+```
+
+
+
+
+
+# Supp. Fig. 19. A
+
+*Lineage sharing stratifying by Condition*
+*Consider intersection of tested genes*
+```{r}
+file.name <- "01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-list.rds"
+l <- readRDS(file.name)
+
+# Add geneId_snpId 
+l <- lapply(l, function(c) lapply(c, function(x){ x$geneId_snpId <- paste0(x$geneId, "_", x$snpId); x}))
+
+# Restructure 
+l <- list(
+  NS = lapply(l, function(x) x[["NS"]]), 
+  IAV = lapply(l, function(x) x[["IAV"]]), 
+  COV = lapply(l, function(x) x[["COV"]])
+)
+# Keep QTLs tested in all lineages
+l <- lapply(l, function(c){
+  vec = Reduce(intersect, lapply(c, function(x) x$geneId_snpId))
+  lapply(c, function(x) x[x$geneId_snpId %in% vec, ])
+  })
+# Re-merge
+l <- lapply(l, function(c) plyr::ldply(c, .id = "lineage"))
+qtl <- plyr::ldply(l, .id = "Condition")
+
+# Add fdrs from filtered set 
+sig <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+sig <- sig[, c("Condition", "lineage", "geneId", "snpId", "fdr")]
+sig$geneId_snpId <- paste0(sig$geneId, "_", sig$snpId)
+qtl <- merge(qtl, sig, all.x = F, all.y = F) # By this we keep the significant ones from the set of common set of geneId_snpId tested across lineages whitin condition
+
+df <- qtl %>% group_by(Condition, geneId_snpId) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(Condition, n_lineages) %>% summarise(n_spns = n_distinct(geneId_snpId))
+df <- df %>% group_by(Condition) %>% mutate(n_spns_rel = n_spns / sum(n_spns) )
+
+df$n_lineages <- factor(df$n_lineages, levels = c(1:5))
+df$Condition <- factor(df$Condition, levels = rev(names(condition.vec.short)))
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+
+plt <- ggplot(df, aes(y = Condition, x = n_spns_rel, fill = n_lineages)) + 
+  geom_bar(stat = "identity", color = "black", linewidth = 0.25, position = position_stack(reverse = T)) + 
+   geom_text(data = df, aes(label = round(n_spns_rel, 2)), position = position_stack(vjust = 0.5, reverse = T),
+             color="black", size=3.5/.pt, angle = 90) + 
+  scale_fill_brewer("N lineages", palette = "Blues") + 
+  xlab("% TU-QTLs") + 
+  # facet_grid( Condition ~., scales = "free_x", switch = "y") +
+  plot_theme + 
+  theme(axis.title.y = element_blank(), axis.line.y = element_blank(),
+        #axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 3.5, margin = margin(b = 0)), 
+        legend.box.spacing = unit(0.2, "cm"),
+        legend.key.size = unit(0.2, "cm"),
+        legend.title = element_text(size = 5, margin = margin(b = 0, unit = "cm"))
+        )+ 
+  guides(fill = guide_legend(byrow = FALSE, override.aes = list(color = "white", linewidth = 0.15)))
+
+file.name <- "02_Plots/03_celltype-fractions/02_03_01_TU-QTL-lineage-sharing-02_by-Condition-01_horizontal.pdf"
+ggsave(file.name, plt, width = 5, height = 5, units = "cm")
+```
+
+
+# Supp Fig. 19. B
+
+*Condition sharing*
+
+*Assessing  condition sharing within each immune lineage is "more fair" than lineage sharing across condition because of sample size. However, we subset to intersection of tested genes to make a more robust assessment*
+
+```{r}
+file.name <- "01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-list.rds"
+l <- readRDS(file.name)
+
+# Add geneId_snpId 
+l <- lapply(l, function(c) lapply(c, function(x){ x$geneId_snpId <- paste0(x$geneId, "_", x$snpId); x}))
+
+# Keep QTLs tested in all lineages
+l <- lapply(l, function(c){
+  vec = Reduce(intersect, lapply(c, function(x) x$geneId_snpId))
+  lapply(c, function(x) x[x$geneId_snpId %in% vec, ])
+  })
+
+# Re-merge
+l <- lapply(l, function(ct) plyr::ldply(ct, .id = "Condition"))
+qtl <- plyr::ldply(l, .id = "lineage")
+
+# Add fdrs from filtered set 
+sig <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+sig <- sig[, c("Condition", "lineage", "geneId", "snpId", "fdr")]
+sig$geneId_snpId <- paste0(sig$geneId, "_", sig$snpId)
+qtl <- merge(qtl, sig, all.x = F, all.y = F)
+
+# Count sharing
+df <- qtl %>% group_by(lineage, geneId_snpId) %>% summarise(n_conditions = n_distinct(Condition), Condition = paste(Condition, collapse = ","))
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_snps = n_distinct(geneId_snpId))
+df <- df %>% group_by(lineage) %>% mutate(n_snps_rel = n_snps /sum(n_snps))
+
+df$Condition <- plyr::revalue(df$Condition, c("NS" = "Baseline", 
+                                              "COV,NS" = "Baseline,COV", "IAV,NS" = "Baseline,IAV", 
+                                              "COV,IAV" = "IAV,COV", "COV,IAV,NS" = "All"))
+
+df$Condition <- factor(df$Condition, levels = c("Baseline", "IAV", "COV","Baseline,IAV","Baseline,COV", 
+                                                "IAV,COV", "All"))
+df$lineage <- factor(df$lineage, levels = rev(lineage.df$lineage))
+color.vec <- c("Baseline" = "#edf2f4", "IAV" = "#75A9D1", "COV" = "#c1121f", 
+               "Baseline,COV" = "#780000", "Baseline,IAV" = "#003049", 
+               "IAV,COV" = "#ffb41f", "All" = "#fdf0d5")
+
+plt <- ggplot(df, aes(y = lineage, x = n_snps_rel, fill = Condition)) + 
+  geom_bar(width=0.8, stat = "identity", #color = "white", 
+           linewidth = 0.25, position = position_stack(reverse = T)) + 
+  geom_text(aes(label = round(n_snps_rel, 2)), position = position_stack(vjust = 0.5, reverse = T),
+            color="black", alpha = 1, size=3/.pt, angle = 90) +
+  scale_fill_manual(values = color.vec ) +
+  xlab("% TU-QTLs") + 
+  plot_theme  + theme(axis.title.y = element_blank(), axis.line.y = element_blank())
+plt
+
+file.name <- "02_Plots/03_celltype-fractions/02_03_02_TU-QTL-Condition-sharing-02_by-Lineage-01_horizontal.pdf"
+ggsave(file.name, plt, width = 5.5, height = 5, units = "cm")
+```
+
+
+
+# Supp. Fig. 19. C
+
+- For plots with TU Gene or QTL *Change params*
+
+- Consider genes tested in all conditions
+```{r}
+l <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-list.rds")
+l <- unlist(l, recursive = F)
+gene.l <- lapply(l, function(x) unique(x$geneId))
+gene.vec <- Reduce(intersect, gene.l)
+```
+
+```{r}
+t <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+# Subset to genes tested across all lineage-conditions
+t <- t[t$geneId %in% gene.vec, ]
+df <- t %>% distinct(lineage, Condition, gene_name) # for gene_names
+# df <- t %>% distinct(lineage, Condition, snpId) # for QTLs
+l <- split(df, df$lineage)
+l <- lapply(l, function(x) split(x, x$Condition))
+gene.l <- lapply(l, function(x) lapply(x, function(y) y$gene_name)) # for gene_names
+#gene.l <- lapply(l, function(x) lapply(x, function(y) y$snpId)) # for QTLs
+# unlist one level
+gene.l <- unlist(gene.l, recursive = F)
+#Pre-process for upset # prepare.ComplexUpset() is preloaded
+df <- prepare.ComplexUpset(gene.l)
+```
+
+- ComplexUpset Plot 
+```{r}
+# naming
+colnames(df) <-  gsub("(.*)\\.(.*\\..*)", "\\1_\\2", colnames(df))
+name.df <- data.frame(ct_condition = colnames(df))
+name.df$lineage <- gsub("\\..*", "", name.df$ct_condition)
+name.df$lineage <- gsub("_", ".", name.df$lineage)
+name.df$Condition <- gsub(".*\\.", "", name.df$ct_condition)
+name.df <- merge(name.df,  lineage.df[, c("lineage", "color")], by = "lineage", all = T)
+name.df$Condition_2 <- plyr::revalue(name.df$Condition, condition.vec.short)
+name.df$lineage_Condition_2 <- paste0(name.df$lineage, "  ", name.df$Condition_2)
+# subset name.df
+name.df <- name.df[name.df$ct_condition %in% colnames(df), ]
+name.vec <- setNames(name.df$lineage_Condition_2, nm = name.df$ct_condition)
+color.vec <- setNames(name.df$color, nm = name.df$ct_condition)
+
+min_set_size = 1
+font_size = 5
+# Plot
+plt <- ComplexUpset::upset(df, names(df), 
+                           min_size = min_set_size,
+                           set_sizes = FALSE, 
+                           labeller = ggplot2::as_labeller(name.vec), 
+                           name = NULL, 
+                           height_ratio=0.8,
+                           matrix=( intersection_matrix(geom=geom_point(size=0.75))), 
+                    base_annotations = list(
+                      # Barplot
+                      'N of Genes with a TU-QTL' = intersection_size( fill = "#778da9",
+                                                            text = list(size = 3/.pt, angle=90, vjust = 0.5, hjust = -0.2),
+                                                            text_colors = c(on_background = "black",
+                                                                            on_bar = "black")) +
+                                      theme( panel.grid = element_blank(), axis.line = element_line(), 
+                                             axis.title.y = element_text(size = font_size, vjust = -15),
+                                             axis.text.y  = element_text(size = font_size))
+                      ),
+                    themes=upset_modify_themes(
+                      list(
+                        'intersection_size'=theme(text=element_text(size=font_size),
+                                                  plot.margin = margin(0, 0, 0, 0, unit = "cm")),
+                        'intersections_matrix'=theme(text=element_text(size=font_size),
+                                                     plot.margin = margin(0, 0, 0, 0, unit = "cm"))
+                        )), 
+queries=list(upset_query(set= "T_CD4.NS", color = "#355070", fill="#355070"), # Not finding a systematic way of edditing colors !
+             upset_query(set= "T_CD4.IAV", color = "#355070", fill="#355070"), 
+             upset_query(set= "T_CD4.COV", color = "#355070", fill="#355070"), 
+             upset_query(set= "T_CD8.NS", color = "#b56576", fill="#b56576"), 
+             upset_query(set= "T_CD8.IAV", color = "#b56576", fill="#b56576"),
+             upset_query(set= "T_CD8.COV", color = "#b56576", fill="#b56576"),
+             upset_query(set= "MONO.NS", color = "#6d597a", fill="#6d597a"),
+             upset_query(set= "MONO.IAV", color = "#6d597a", fill="#6d597a"),
+             upset_query(set= "MONO.COV", color = "#6d597a", fill="#6d597a"),
+             upset_query(set= "NK.NS", color = "#eaac8b", fill="#eaac8b"),
+             upset_query(set= "NK.IAV", color = "#eaac8b", fill="#eaac8b"),
+             upset_query(set= "NK.COV", color = "#eaac8b", fill="#eaac8b"), 
+             upset_query(set= "B.NS", color = "#e56b6f", fill="#e56b6f"),
+             upset_query(set= "B.IAV", color = "#e56b6f", fill="#e56b6f"), 
+             upset_query(set= "B.COV", color = "#e56b6f",fill="#e56b6f")
+             )
+)
+
+plt
+file.name <- paste0("02_Plots/03_celltype-fractions/02_01_TU-Gene-ComplexUpset-01_lineage-min-set-", min_set_size, "-intersect-tested-genes.pdf") # for TU Gene
+# file.name <- paste0("02_Plots/03_celltype-fractions/02_02_TU-QTL-ComplexUpset-01_lineage-min-set-", min_set_size, "-intersect-tested-genes.pdf") # for TU QTL
+ggsave(file.name, plt, width = 18, height = 6, units = "cm")
+# file.name <- gsub(".pdf", ".svg", file.name)
+# ggsave(file.name, plt, width = 12, height = 5, units = "cm", bg = "white")
+```
+
+### Get N sharing
+*Fractions of gene-SNP pairs shared*
+```{r}
+# 1. Sharing across lineage_Condition
+
+l <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-list.rds") # Consider sets tested in all conditions
+l <- unlist(l, recursive=F)
+l <- lapply(l, function(x) paste0(x$geneId, "_", x$snpId))
+vec <- Reduce(intersect, l)
+
+
+df <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-df.rds")
+df$geneId_snpId <- paste0(df$geneId, "_", df$snpId)
+df$lineage_Condition <- paste0(df$lineage, "_", df$Condition)
+df <- df %>% dplyr::select(geneId_snpId, lineage_Condition)
+df <- df[df$geneId_snpId %in% vec, ] # subset to variants tested in all conditions
+df <- df %>% group_by(geneId_snpId) %>% summarise(n_conditions = n_distinct(lineage_Condition))
+df <- df %>%  group_by(n_conditions) %>% summarise(n_qtls = n_distinct(geneId_snpId))
+df$n_qtls_rel <- df$n_qtls / sum(df$n_qtls)
+df.1 <- df
+
+# 2.Condition sharing across lineages
+l <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-list.rds") # Consider sets tested in all conditions
+l <- lapply(l, function(x)lapply(x, function(y) paste0(y$geneId, "_", y$snpId) ))
+l <- lapply(l, function(x) Reduce(intersect, x))
+
+sig.l <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-list.rds")
+sig.l <- lapply(sig.l, function(x)lapply(x, function(y) paste0(y$geneId, "_", y$snpId) ))
+cts <- names(sig.l)
+sig.l <- lapply(cts, function(ct) lapply(sig.l[[ct]], function(y) data.frame( geneId_snpId = y[y %in% l[[ct]]]) )) # subset to common variants across conditions
+names(sig.l) <- cts
+sig.l <- lapply(sig.l, function(ct) plyr::ldply(ct, .id ="Condition"))
+df <- plyr::ldply(sig.l, .id = "lineage")
+df$lineage_Condition <- paste0(df$lineage, "_", df$Condition)
+df <- df %>% group_by(lineage, geneId_snpId) %>% summarise(n_conditions = n_distinct(Condition))
+df <- df %>% group_by(lineage, n_conditions) %>% summarise(n_qtls = n_distinct(geneId_snpId))
+df <- df %>% group_by(lineage) %>% mutate(n_qtls_rel = n_qtls / sum(n_qtls))
+df[df$n_conditions == 3, ]
+df.2 <- df
+
+# 3. Lineage sharing across Conditions
+l <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-tested-list.rds") # Consider sets tested in all conditions
+l <- list("NS" = lapply(l, function(x) x[["NS"]]), "IAV" = lapply(l, function(x) x[["IAV"]]), "COV" = lapply(l, function(x) x[["COV"]]))
+l <- lapply(l, function(x)lapply(x, function(y) paste0(y$geneId, "_", y$snpId) ))
+l <- lapply(l, function(x) Reduce(intersect, x))
+
+sig.l <- readRDS("01_Processed-Data/03_celltype-fractions/01_sQTLseekeR2-permuted-fdr-0.01-list.rds")
+sig.l <- list("NS" = lapply(sig.l, function(x) x[["NS"]]), "IAV" = lapply(sig.l, function(x) x[["IAV"]]), "COV" = lapply(sig.l, function(x) x[["COV"]]))
+sig.l <- lapply(sig.l, function(x)lapply(x, function(y) paste0(y$geneId, "_", y$snpId) ))
+
+conditions <- names(sig.l)
+sig.l <- lapply(conditions, function(c) lapply(sig.l[[c]], function(y) data.frame( geneId_snpId = y[y %in% l[[c]]]) )) # subset to common variants across conditions
+names(sig.l) <- conditions
+sig.l <- lapply(sig.l, function(ct) plyr::ldply(ct, .id ="lineage"))
+df <- plyr::ldply(sig.l, .id = "Condition")
+df <- df %>% group_by(Condition, geneId_snpId) %>% summarise(n_lineages = n_distinct(lineage))
+df <- df %>% group_by(Condition, n_lineages) %>% summarise(n_qtls = n_distinct(geneId_snpId))
+df <- df %>% group_by(Condition) %>% mutate(n_qtls_rel = n_qtls / sum(n_qtls))
+df[df$n_lineages == 5, ]
+df.3 <- df
+
+
+l <- list("lineage_Condition_sharing" = df.1, "Condition_sharing_across_lineage" = df.2, "lineage_sharing_across_Condtion" = df.3)
+saveRDS( l, "01_Processed-Data/03_celltype-fractions/01_02_TU-QTL-sharing-numbers.rds" )
+```
+
+# 2.3 KEEP Get N of lineage specific TU-QTLs
+
+```{r}
+qtls.all <- read.table("01_Processed-Data/03_celltype-fractions/results_all_tested.tsv", sep = "\t", header = T)
+colnames(qtls.all) <- plyr::revalue(colnames(qtls.all), c("cell.lineage" = "lineage", "condition" = "Condition"))
+qtls.all$Condition <- plyr::revalue(qtls.all$Condition, c("Baseline" = "NS", "Influenza A Virus" = "IAV", "SARS-CoV-2" = "COV"))
+# get list of snpIds tested in all lineage-Condtions
+qtls.all <- qtls.all %>% filter(lineage %in% c("T.CD4", "T.CD8", "MONO")) %>% distinct(lineage, Condition, gene_name, snpId)
+
+# Select those SNPs common to all lineage-Conditions
+l <- split(qtls.all, qtls.all$lineage)
+l <- lapply(l, function(x) split(x, x$Condition))
+l <- unlist(l, recursive = F)
+snp.l <- lapply(l, function(x) x$snpId)
+common.snps <- Reduce(intersect, snp.l)
+length(common.snps)
+
+# N of lineage specific
+qtls.sig <- read.table("01_Processed-Data/03_celltype-fractions/results_all_significant.tsv", sep = "\t", header = T)
+qtls.sig <- qtls.sig %>% filter(lineage %in% c("T.CD4", "T.CD8", "MONO")) %>% distinct(lineage, Condition, gene_name, snpId)
+qtls.sig <- qtls.sig[qtls.sig$snpId %in% common.snps, ]
+qtls.sig <- qtls.sig %>% group_by(Condition, snpId) %>% summarise(n_lineage = n_distinct(lineage), 
+                                                                  lineages = paste0(unique(lineage), collapse=","))
+
+qtls.sig <- qtls.sig %>% group_by( Condition, n_lineage, lineages ) %>% summarise(n_qtls = n_distinct(snpId))
+qtls.sig <- qtls.sig %>% group_by(Condition) %>% mutate(n_qtls_rel = n_qtls/ sum(n_qtls))
+# qtls.sig <- qtls.sig %>% group_by(Condition, n_lineage) %>% summarise(n_qtls = sum(n_qtls), n_qtls_rel= sum(n_qtls_rel))
+qtls.sig
+
+# N of condition specific
+qtls.sig <- read.table("01_Processed-Data/03_celltype-fractions/results_all_significant.tsv", sep = "\t", header = T)
+qtls.sig <- qtls.sig %>% filter(lineage %in% c("T.CD4", "T.CD8", "MONO")) %>% distinct(lineage, Condition, gene_name, snpId)
+qtls.sig <- qtls.sig[qtls.sig$snpId %in% common.snps, ]
+qtls.sig <- qtls.sig %>% group_by(lineage, snpId) %>% summarise(n_conditions = n_distinct(Condition), 
+                                                                conditions = paste0(unique(Condition), collapse=","))
+
+qtls.sig <- qtls.sig %>% group_by( lineage, n_conditions, conditions ) %>% summarise(n_qtls = n_distinct(snpId))
+qtls.sig <- qtls.sig %>% group_by(lineage) %>% mutate(n_qtls_rel = n_qtls/ sum(n_qtls))
+# qtls.sig <- qtls.sig %>% group_by(lineage, n_conditions) %>% summarise(n_qtls = sum(n_qtls), n_qtls_rel= sum(n_qtls_rel))
+qtls.sig
+```
+
+
+

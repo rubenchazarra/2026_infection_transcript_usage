@@ -1,0 +1,129 @@
+---
+title: "03_DTU-DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+
+- Infection DTU Data Analysis
+
+Code to generate Supplementary Figure 6.C
+
+- Functions
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/01_infectionDTU/02_DA") # come back to notebook 
+```
+
+# Supp Fig. 6.C 
+
+c) Upset plots showing the overlap of infection-associated DTU for gene sets containing more than 3 DTU genes. 
+
+- Read data 
+```{r}
+file.name <- "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-filtered-list.rds"
+dtu.l <- readRDS(file.name)
+# select lineage
+dtu.l <- dtu.l$lineage
+# unlist one level
+dtu.l <- unlist(dtu.l, recursive = F)
+# Remove IAV.COV comparison from here
+dtu.l <- dtu.l[grep("IAV.COV", names(dtu.l), invert = T) ]
+# Get gene_id
+dtu.l <- lapply(dtu.l, function(x) x$gene_name)
+
+# Subset to particular lineages 
+# select <- c("T.CD4.COV.NS", "T.CD4.IAV.NS", "T.CD8.COV.NS", "T.CD8.IAV.NS", "MONO.COV.NS", "MONO.IAV.NS")
+# dtu.l <- dtu.l[ select ]
+
+# Pre-process for upset
+df <- prepare.ComplexUpset(dtu.l)
+```
+
+- ComplexUpset Plot * Work has to be done here*
+```{r}
+# naming
+colnames(df) <-  gsub("(.*)\\.(.*\\..*)", "\\1_\\2", colnames(df))
+name.df <- data.frame(ct_condition = colnames(df))
+name.df$lineage <- gsub("_.*", "", name.df$ct_condition)
+name.df$Condition <-  gsub(".*_", "", name.df$ct_condition)
+name.df <- merge(name.df,  lineage.df[, c("lineage", "color")], by = "lineage")
+name.df$Condition_2 <- plyr::revalue(name.df$Condition, condition.pairwise.vec.short)
+name.df$lineage_Condition_2 <- paste0(name.df$lineage, " ", name.df$Condition_2)
+# subset name.df
+name.df <- name.df[name.df$ct_condition %in% colnames(df), ]
+name.vec <- setNames(name.df$lineage_Condition_2, nm = name.df$ct_condition)
+
+min_set_size = 3
+font_size = 6
+# Plot
+plt <- ComplexUpset::upset(df, names(df), 
+                           min_size = min_set_size,
+                           set_sizes = FALSE, 
+                           labeller = ggplot2::as_labeller(name.vec), 
+                           name = NULL, 
+                           height_ratio=0.8,
+                           matrix=( intersection_matrix(geom=geom_point(size=1))), 
+                           
+                    base_annotations = list(
+                      # Barplot
+                      'N infection DTU genes' = intersection_size( fill = "#778da9",
+                                                            text = list(size = 5/.pt, angle=90, vjust = 0.5, hjust = -0.2),
+                                                            text_colors = c(on_background = "black",
+                                                                            on_bar = "black")) +
+                                      theme( panel.grid = element_blank(), axis.line = element_line(), 
+                                             axis.title.y = element_text(size = font_size, vjust = -25),
+                                             axis.text.y  = element_text(size = font_size))
+                      ),
+                    themes=upset_modify_themes(
+                      list(
+                        'intersection_size'=theme(text=element_text(size=font_size),
+                                                  plot.margin = margin(0, 0, 0, 0, unit = "cm")),
+                        'intersections_matrix'=theme(text=element_text(size=font_size),
+                                                     plot.margin = margin(0, 0, 0, 0, unit = "cm"))
+                        )), 
+queries=list(upset_query(set= "T.CD4_IAV.NS", color = "#355070", fill="#355070"), 
+             upset_query(set= "T.CD4_COV.NS", color = "#355070", fill="#355070"), 
+             # upset_query(set= "T.CD4.IAV.COV", fill="#355070"), 
+             upset_query(set= "T.CD8_IAV.NS", color = "#b56576", fill="#b56576"), 
+             upset_query(set= "T.CD8_COV.NS", color = "#b56576", fill="#b56576"),
+             # upset_query(set= "T.CD8_IAV.COV", color = "#b56576", fill="#b56576"),
+             upset_query(set= "MONO_IAV.NS", color = "#6d597a", fill="#6d597a"), 
+             upset_query(set= "MONO_COV.NS", color = "#6d597a", fill="#6d597a"),
+             # upset_query(set= "MONO_IAV.COV", color = "#6d597a", fill="#6d597a"), 
+             upset_query(set= "NK_IAV.NS", color = "#eaac8b", fill="#eaac8b"), 
+             upset_query(set= "NK_COV.NS", color = "#eaac8b", fill="#eaac8b"),
+             # upset_query(set= "NK.IAV.COV", fill="#eaac8b"), # no hits
+             upset_query(set= "B_IAV.NS", color = "#e56b6f", fill="#e56b6f"),
+             upset_query(set= "B_COV.NS", color = "#e56b6f", fill="#e56b6f")#,
+             #upset_query(set= "B.IAV.COV", fill="#e56b6f") # no hits
+             ))
+plt
+
+file.name<- paste0("02_Plots/05_Filt-1-5-0.8-0.01/04_01_infectionDTU-sharing-ComplexUpset-01_lineage-IAV.NS-COV.NS-min-set-", min_set_size, ".pdf")
+ggsave(file.name, plt, width = 9, height = 6, units = "cm")
+# file.name <- gsub(".pdf", ".svg", file.name)
+# ggsave(file.name, plt, width = 12, height = 6, units = "cm", bg = "white")
+```
+
+- check sets manually
+```{r}
+extract.df <- df
+extract.df$set_combination <- apply(df, 1, function(x) { paste(names(x)[x], collapse = ",") })
+# View genes in each set combination
+select.set <- c("B_COV.NS", "B_IAV.NS",   #"B.IAV.COV",
+                "MONO_COV.NS", "MONO_IAV.NS",  #"MONO.IAV.COV"#,
+                "NK_COV.NS", "NK_IAV.NS", 
+                "T.CD4_COV.NS", "T.CD4_IAV.NS",  #"T.CD4.IAV.COV", 
+                "T.CD8_COV.NS", "T.CD8_IAV.NS"
+                )
+select.set <- paste0(select.set, collapse = ",")
+select.genes <- rownames(extract.df[extract.df$set_combination %in% select.set, ])
+sort(select.genes)
+```
+
+
+

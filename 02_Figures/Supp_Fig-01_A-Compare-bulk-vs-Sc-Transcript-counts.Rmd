@@ -1,0 +1,94 @@
+---
+title: "Compare kallisto estimated transcript counts from bulk RNA-seq and single-cell data"
+author: "Ruben Chazarra Gil"
+date: "2024-11-11"
+output: html_document
+---
+
+
+# 0. Goal 
+
+To prove that Transcript abundance estimation with EM algorithm fails with scRNA-seq data due to the 3' coverage biase, we compare bulk RNA-seq estimated transcript counts obtained with kallisto, and the single-cell ones obtained with bustools using the Randolph et al. (2021) dataset.
+
+# 1. Load data 
+
+## 1. Bulk RNA-seq
+```{r}
+bulk.tx <- readRDS("../../01_Quantification/01_bulk-RNAseq/01_Kallisto/03_Processing/01_transcript-counts/01_kallisto-merge-GENCODEv42-transcript_id/kallisto-bulk-matched-samples-scRNAseq-est-counts.rds")
+```
+
+## 1.2 Pseudobulk scRNAseq
+
+NOTE: this are transcript estimated counts generated with kallisto bustools, and later filtered, this is why we only have 12K transcripts.
+```{r}
+sc.tx <- readRDS("../../03_Seurat-processing/05_Pseudobulk/01_pseudobulk/02_Azimuth/kallisto-bustools/01_GENCODEv42/01_transcripts/L1/PBMCs-kb-transcripts-Azimuth-L1-pseudobulk.rds")
+```
+
+# 3. Plots 
+
+## 3.1 Correlation
+
+- Check overlap of bulk and single-cell transcripts
+```{r}
+data.frame("bulk.uniq" = length(setdiff(rownames(bulk.tx), rownames(sc.tx))), 
+           "sc.uniq" =  length(setdiff(rownames(sc.tx), rownames(bulk.tx))), 
+           "both" =  length(intersect(rownames(bulk.tx), rownames(sc.tx))))
+```
+
+- Consider donors and transcripts present in bulk RNA-seq and single-cell set 
+```{r}
+common.donors <- intersect(colnames(bulk.tx), colnames(sc.tx))
+common.tx <- intersect(rownames(bulk.tx), rownames(sc.tx))
+
+bulk.tx <- bulk.tx[common.tx , common.donors ] 
+sc.tx <- sc.tx[common.tx , common.donors ] 
+```
+
+- Correlate *Done in interactive session because it requires time and memory (112GB)*
+```{r}
+df.l <- parallel::mclapply(rownames(bulk.tx), function(i){
+  print(match(i, rownames(bulk.tx)))
+  data.frame( feat = i,
+              cor = cor( as.numeric(bulk.tx[i, ]), as.numeric(sc.tx[i, ]) ),
+              p.value = cor.test( as.numeric(bulk.tx[i, ]), as.numeric(sc.tx[i, ]) )$p.value,
+	      "mean.exp.bulk" = Matrix::rowMeans(bulk.tx[i, ]),
+              "mean.exp.sc" = Matrix::rowMeans(sc.tx[i, ]))
+}, mc.cores = 112)
+
+df <- data.table::rbindlist(df.l)
+df$fdr <- p.adjust(df$p.value)
+```
+
+- Save
+```{r}
+saveRDS(df, "01_Processed-Data/01_Randolph-cor-Tx-counts-bulk-sc.rds")
+```
+
+- Load
+```{r}
+df <- readRDS("01_Processed-Data/01_Randolph-cor-Tx-counts-bulk-sc.rds")
+```
+
+- Histogram (highlighting significant correlations)
+```{r}
+# Aesthetics repo
+source("../../../02_Anquino2023/00_MetaData/03_Aesthetics-repo.R")
+setwd("../../01_Randolph2021/01_Exploration/11_Est-Tx-bulk-vs-sc/")
+
+df <- readRDS("01_Processed-Data/01_Randolph-cor-Tx-counts-bulk-sc.rds")
+df$fdr_cat <- ifelse(df$fdr < 0.05, yes = "Sig", no = "NS") # Label significant correlations
+color.vec <- c("Sig" = "#ff7f0eff", "NS" = "#1f77b4ff")
+n_tx <- nrow(df)
+sub_tit <- paste0("N transcripts = ", n_tx)
+
+plt <- ggplot(df, aes(x = cor, fill = fdr_cat)) + geom_histogram(color = "white") + #geom_density( fill = "#2a9d8f") + 
+  xlim(-1, 1) + 
+  labs(subtitle = sub_tit) + 
+  xlab("Correlation Transcript Counts Bulk RNA-seq vs Single-cell (pseudo-bulk)") + ylab("N transcripts") + 
+  scale_fill_manual("Cor", values = color.vec) +
+  plot_theme + theme(plot.subtitle=element_text(size=6))
+
+# Save
+file.name <- "02_Plots/01_Corr-est-counts-bulk-vs-sc-pseudobulk-02-histogram.pdf"
+ggsave(file.name, plt, width = 7, height = 5, units = "cm")
+```

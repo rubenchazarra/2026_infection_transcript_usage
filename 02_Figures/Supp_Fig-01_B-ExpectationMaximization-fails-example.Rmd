@@ -1,0 +1,239 @@
+---
+title: "Kallisto Expectation Maximization algorithm fails to accurately estimtate transcript abundances due to single-cell coverage bias"
+author: "Ruben Chazarra Gil"
+date: "2024-11-11"
+output: html_document
+---
+
+
+# 0. Goals
+
+Pseudo-aligners such as kallisto or Salmon assign reads to Equivalence Classes (EC) which represent a set of transcripts that a read is compatible with, generating EC counts. Then transcript abundances are estimated probabilistically from EC counts using Expectation Maximization algorithm. We want to show that this estimation in single-cell data fails due to the intrinsic 3' or 5' coverage bias of this data modality. 
+
+For this we here do: 
+
+1) Select N cells from a single-cell library with highest expression for a gene that has 2 transcripts that are stucturally equal in their 3' end (Where single-cell coverage is present)
+2) Visualize the transcripts and their corresponding equivalence classes, along with coverage from this N cells
+
+
+# 1. Retrieve gene counts, EC counts and Transcript estimated abundances for top N cells and HLA-DRA gene (example gene)
+
+- Load data 
+```{r}
+# Genes
+genes <- readRDS("../../03_Seurat-processing/02_Seurat-filtering/GENCODEv42/kallisto-bustools/03_GENCODEv42-filt/01_genes/GSM4955740-Seurat-filt-kb-genes.rds")
+# Equivalence Class Counts
+ec <- readRDS("../../03_Seurat-processing/02_Seurat-filtering/GENCODEv42/kallisto-bustools/03_GENCODEv42-filt/01_tcc/GSM4955740-Seurat-filt-kb-tcc.rds")
+# Estimated Transcript Abundances
+tx <- readRDS("../../03_Seurat-processing/02_Seurat-filtering/GENCODEv42/kallisto-bustools/03_GENCODEv42-filt/01_transcripts/GSM4955740-Seurat-filt-kb-transcripts.rds")
+```
+
+- Select 10 cells with highest gene count
+```{r}
+gene_id <- "ENSG00000204287.14" # gene_name <- "HLA-DRA" # We select this gene because it has 2 transcripts highly similar in structure
+
+# Select cells with highest counts
+mat <- genes@assays$RNA@counts
+n_cells <- 10 
+gene.vec <- sort(mat [ gene_id, ], decreasing = T ) [1 : n_cells] # select 10 cells
+cell.vec <- names(gene.vec)
+# Save cell barcodes
+cell.vec.i <- gsub("GSM4955740-", "", cell.vec)
+# write.table(cell.vec.i, file = "", col.names = F, row.names = F, quote = F)
+
+# Equivalence class counts
+## Add gene_id, gene_name to EC ids
+source("../../05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+tx2gene <- read.table("../../01_Quantification/00_IndexData/01_GENCODEv42/gencode.v42-IAV-tx2gene-with-ENS.tsv", header = T) # df with gene_id, gene_name, transcript_id and transcript_name
+annot.df <- annotate.equivalence.classess(ec.vec = rownames(ec), tx2gene = tx2gene, n_cores = 112)
+ec_ids <- annot.df[grep(gene_id, annot.df$gene_id), "ec"] #  "ENST00000374982.5"; "ENST00000395388.7"; "ENST00000374982.5,ENST00000395388.7"
+
+ec_names <- annot.df[grep(gene_id, annot.df$gene_id), "transcript_name"]
+ec <- ec@assays$RNA@counts
+ec <- ec[ ec_ids,   ]
+ec <- ec[ , match(cell.vec, colnames(ec))]
+
+# Transcript counts
+tx <- tx@assays$RNA@counts
+tx_ids <- tx2gene[ tx2gene$gene_id %in% gene_id, "transcript_id"] # select transcript ids: "ENST00000374982.5" "ENST00000395388.7"
+tx <- tx[ tx_ids,   ]
+tx <- tx[ , match(cell.vec, colnames(tx))]
+```
+
+## 1.2 Barplot showing gene-level counts, Equivalence class counts, and Estimated transcript counts for 10 cells with the top gene expression in one library in Aquino et al. (2023)
+
+```{r}
+source("../../../02_Anquino2023/00_MetaData/03_Aesthetics-repo.R") # script with plot aesthetics
+setwd("../../01_Randolph2021/01_Exploration/12_EM-fails-example/") # change dir back to here
+
+# Gene counts plot
+gene.df <- data.frame(count = gene.vec, cell = paste0("cell ", c(1:10)), class = "Gene counts", gene = "HLA-DRA")
+gene.df$cell  <- factor(gene.df$cell, levels = gene.df$cell)
+
+gene.plt <- ggplot(data = gene.df, aes(x = cell, y = count, fill = gene)) +
+  ylim(0, 155) + 
+  geom_bar(stat= "identity",  color = "black", linewidth=0.25) + 
+  geom_text(data = gene.df, aes(y = count, label = count), alpha = 1, color = "black", size = 5/.pt, vjust = -0.25, hjust = 0.5) +  
+  xlab("Cell") + ylab("Gene Counts") + 
+  plot_theme + 
+  scale_fill_manual("Gene", values = c("white")) + 
+  theme(plot.title = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
+        legend.box = "vertical",
+        legend.key.size = unit(0.2, "cm")) 
+
+# EC counts plot 
+colnames(ec) <- paste0("cell ", c(1:10))
+rownames(ec) <- c("HLA-DRA-201", "HLA-DRA-202", "HLA-DRA-201,202")
+ec.df <- reshape2::melt(as.matrix(ec), value.name="count", varnames=c("EC", "cell"))
+ec.df$cell  <- factor(ec.df$cell, levels = gene.df$cell)
+
+color.vec <- c("#1f77b4", "#ff7f0e", "#2ca02c")
+
+ec.plt <- ggplot(data = ec.df, aes(x = cell, y = count, fill = EC)) +
+  geom_bar(stat= "identity", #color = "white",
+           linewidth=0.1) + 
+  geom_text(data = ec.df[ec.df$count >0, ], aes(y = count, label = count), 
+            alpha = 1, color = "black", size = 5/.pt, vjust = -0.25, hjust = 0.5,
+            position = position_stack(vjust = .5)) +  
+  xlab("Cell") + ylab("Eq class Counts") + 
+  plot_theme + 
+  scale_fill_manual("EC", values = color.vec) + 
+  theme(plot.title = element_blank(), axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
+        legend.box = "vertical",
+        legend.key.size = unit(0.2, "cm")) 
+
+
+# Transcript counts plot 
+colnames(tx) <- paste0("cell ", c(1:10))
+rownames(tx) <- c("HLA-DRA-201", "HLA-DRA-202")
+tx.df <- reshape2::melt(as.matrix(tx), value.name="count", varnames=c("Transcript", "cell"))
+tx.df$cell  <- factor(tx.df$cell, levels = gene.df$cell)
+
+color.vec <- c("grey70", "grey90")
+tx.plt <- ggplot(data = tx.df, aes(x = cell, y = count, fill = Transcript)) +
+  geom_bar(stat= "identity", color = "white", linewidth=0.25) + 
+  geom_text(data = tx.df[tx.df$count >0, ], aes(y = count, label = round(count,2)), 
+            alpha = 1, color = "black", size = 5/.pt, vjust = -0.25, hjust = 0.5,
+            position = position_stack(vjust = .5)) +  
+  xlab("Cell") + ylab("Transcript Counts") + 
+  plot_theme + 
+  scale_fill_manual("Transcript", values = color.vec) + 
+  theme(plot.title = element_blank(), #axis.text.x = element_blank(), axis.ticks.x = element_blank(), axis.title.x = element_blank(),
+        legend.box = "vertical",
+        legend.key.size = unit(0.2, "cm")) 
+
+# Merge plots 
+plt <- cowplot::plot_grid(
+  gene.plt, ec.plt, tx.plt, 
+  nrow = 3, align = "v", axis = "rl" , rel_heights =  c(0.3, 0.3, 0.4)
+    )
+plt
+
+file.name <- "02_Plots/02_HLA-DRA-counts-Barplot.pdf"
+ggsave(file.name, plt, width = 12, height = 7, units = "cm")
+```
+
+
+# 2. Visualize HLA-DRA gene Equivalence classes
+
+## 2.1 Transcript and EC models 
+```{r}
+## Functions
+source("../../05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../../02_Anquino2023/03_Differential/02_DTU/00_Scripts/05_DTU-viz-02_EC-coord-Coverage-plot.R")
+## Data
+tx2gene <- read.table("../../01_Quantification/00_IndexData/01_GENCODEv42/gencode.v42-IAV-tx2gene-with-ENS.tsv", header = T) # df with gene_id, gene_name, transcript_id and transcript_name
+gtf <- as.data.frame(rtracklayer::import("../../01_Quantification/00_IndexData/01_GENCODEv42/gencode.v42.annotation.gtf"))
+gene_id <- "ENSG00000204287.14" # HLA-DRA gene_id
+ecs <- c("ENST00000374982.5", "ENST00000395388.7", "ENST00000374982.5,ENST00000395388.7") # HLA-DRA gene equivalence classes
+ec.annot.df <- annotate.equivalence.classess(ec.vec =ecs, tx2gene = tx2gene, n_cores = 112)
+
+# 1. Transcript Tracks
+## 1.0 Annotation
+tx.vec <- unique(unlist(strsplit(ec.annot.df$ec, ",")))
+tx.annot.df <- annotate.equivalence.classess( tx.vec, tx2gene )
+names(tx.annot.df)[ grep("ec", names(tx.annot.df)) ] <- "transcript_id"
+tx.annot.df <- tx.annot.df[ order(tx.annot.df$transcript_name), ]
+## 1.1. Generate Tx tracks
+tx.track.l <- tx.track.generator(gtf, gene_id, tx.annot.df) 
+    
+# 2. Equivalence class Track
+## 2.1 get EC coordinates (from the entire EC set)
+ec.coord.l <- EC.coordinate.generator( gtf, gene_id, ecs = annot.df ) # annot.df is a dataframe with gene_id and ecs
+ec.names <- names(ec.coord.l)
+ec.coord.l <- lapply( ec.names, function (ec) {
+  ec.coord <- ec.coord.l[[ec]]
+  if(length(ec.coord) > 0){  ec.coord$feature_name <- ec } # add feature name to GRanges
+  return(ec.coord)
+  })
+names(ec.coord.l) <- ec.names
+ec.coord.gtf <- Reduce(c, ec.coord.l)
+```
+
+
+## 2.2 Coverage track
+
+- Load coverage for the HLA-DRA gene locus computed with: i) samtools view to get one bam per cell, ii) sammtools depth to calculate coverage of each bam
+```{r}
+cov <- read.table("01_Coverage-10-cells/02_samtools-depth-10-cells.txt")
+colnames(cov) <- c("chr", "start", paste0("cell_", c(1:10)))
+# Sum coverage of all cells 
+cov <- data.frame("chr" = cov$chr, "start" = cov$start, "end" = cov$start +1, "cov" = rowMeans(cov[, grep("cell_", colnames(cov))]))
+# Cut coverage to the limits of the transcripts represented 
+min.limit <- min( gtf[gtf$type == "transcript" & gtf$transcript_id %in% tx.annot.df$transcript_id, "start"] )
+max.limit <- max( gtf[gtf$type == "transcript" & gtf$transcript_id %in% tx.annot.df$transcript_id, "end"] )
+## 4. Restric cov to the coordinates of the transcripts represented
+cov <- cov[cov$start > min.limit -100 & cov$end < max.limit + 100, ] # I added 100 for plot legibility so it the plot doesn't cut right where the UTRs start
+# 5. Obtain median coverage value per 10 bp bin
+bin_size <- 10
+cov <- cov %>% mutate(start = floor(start/ bin_size) * bin_size) %>% group_by(chr, start) %>% summarise(cov = median(cov))
+cov$end <- cov$start + 1
+
+# Coverage track
+require(GenomicRanges)
+require(Gviz)
+gr <- GRanges(cov)
+# DataTrack
+cov.track <- DataTrack(range = gr, 
+                       genome = "hg38", 
+                       type = "l",  
+                       name = "Mean Coverage (10 cells)", 
+                       # groups = groups, # col = groups.color, 
+                       lwd = 1, 
+                       col.axis="black", col.title="black", # axis color
+                       cex.axis = pt_to_cex(12), cex.title = pt_to_cex(14), # font size
+                       fontface.title = 1,   # 1 = plain, 2 = bold, 3 = italic # font aspect
+                       fontface.axis = 1, 
+                       background.title="transparent",  # axis bar
+                       legend = T,
+                       fontcolor.legend = "black",   # legend
+                       fontface.legend = 1, 
+                       fontfamily.legend = "sans", 
+                       fontsize.legend=14, 
+                       box.legend = TRUE
+)
+```
+
+- Final plot: add coverage track to transcript track, overlay EC track and save
+```{r}
+# add
+track.l <- c(tx.track.l, list("Mean cov" = cov.track ))
+
+## 2.2 highlight tracks must be overlayed on top of an existing track list (tx.track and coverage track in our case)
+track.l <- EC.highlight.fun( tracklist = track.l, ec.coord.gtf )
+## 2.3 Color tracks
+ec.annot.df$exclude_plot <- F # This is for another purpose
+track.l <- edit.EC.highlight.track.fill( track.l, ec.annot.df )
+
+# 3. SAVE
+out_file <- "02_Plots/01_HLA-DRA-Viz-GSM4955740-top10-cells-mean-coverage.pdf"
+pdf(out_file, height = 4, width = 10)
+plotTracks(unlist(track.l, recursive = F),
+           thinBoxFeature = c("utr"), # determines which feature should appear thin
+           transcriptAnnotation = "symbol", 
+           main = "GSM4955740 HLA-DRA (10 cells)", 
+           cex.main = 0.75, 
+           legend = T)
+dev.off()
+```
+

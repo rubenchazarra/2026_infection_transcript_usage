@@ -1,0 +1,254 @@
+---
+title: "04_popDTU-Validation"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+
+# 0. Goal 
+
+*Validation of Aquino results with different data* 
+
+- Load functions
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+```
+
+# 2. Overlap
+
+`Rotival, M., Quach, H. & Quintana-Murci, L. Defining the genetic and evolutionary architecture of alternative splicing in response to infection. Nat Commun 10, 1671 (2019). https://doi.org/10.1038/s41467-019-09689-7`
+
+### 2.1.1 Processing 
+
+- Parse Rotival2019 population differential splicing data
+
+NOTE: 
+They do Differential Splicing with PSI between populations inside each stimulation group
+
+- Load Supplementary Data 4
+```{r}
+require(readxl)
+file.name <- "../../../../../../00_Bibliography/2019-Rotival-Nat_splicing-response-to-infection-Supp/2019-Rotival-Nat_splicing-response-to-infection-SupplementaryData_4.xlsx"
+rotival <- read_excel(file.name, sheet = 1, skip = 18 )
+str(rotival)
+
+# manually determined by looking at excel sheet
+common.cols <- names(rotival)[1:4]
+
+# 1) Non-Stimullated
+ns.cols <- names(rotival)[6:12]
+ns <- rotival[ , c(common.cols, ns.cols) ]
+# 2) LPS-Stimullated
+lps.cols <- names(rotival)[14:20]
+lps <- rotival[ , c(common.cols, lps.cols) ]
+# 3) PAM
+pam.cols <- names(rotival)[22:28]
+pam <- rotival[ , c(common.cols, pam.cols) ]
+# 4) R8
+r8.cols <- names(rotival)[30:36]
+r8 <- rotival[ , c(common.cols, r8.cols) ]
+# 5) IAV-Stimullated
+iav.cols <- names(rotival)[38:44]
+iav <- rotival[, c(common.cols, iav.cols) ]
+## collect to list
+rotival.l <- list("NS" = ns, "LPS" = lps, "PAM" = pam, "R8" = r8, "IAV" = iav)
+
+# update names
+update.names <- c("AS_event_id", "gene_symbol", "event_type", "Is_DS_any_condition", 
+                  "AS", "Delta_psi_AFB_EUB", "p_value_AFB_EUB", "FDR_AFB_EUB",
+                  "DS_AFB_EUB", "sQTL_peak_SNP",
+                  "frac_pop_differences_mediated_peak_SNP" )
+rotival.l <- lapply(rotival.l, function(df) setNames(df, nm= update.names))
+
+# Remove cases where differential splicing could not be determined confidently due to low expression (labelled in DS_AFB_EUB as "n.d")
+rotival.l <- lapply(rotival.l, function(df) df[! df$DS_AFB_EUB %in% "n.d.", ])
+
+# IMPORTANT: Rotival tests PSI, hence genes are repeated, keep one FDR value per Gene, the minimum
+require(dplyr)
+rotival.l <- lapply(rotival.l, function(df){
+  as.data.frame( df %>% group_by(gene_symbol) %>% slice_min(FDR_AFB_EUB, with_ties = FALSE) ) 
+})
+
+# Rename certain columns to match ours
+rotival.l <- lapply(rotival.l, function(x){
+  colnames(x)[ match(c("gene_symbol", "FDR_AFB_EUB"), colnames(x)) ] <- c("gene_name", "fdr")
+  return(x)
+  })
+
+# Save processed Rotival data
+file.name <- "05_popDTU-Overlaps/01_Processed-Data/00_Rotival2019-population-DS-parsed.rds"
+saveRDS(rotival.l, file.name)
+```
+
+### 2.1.2 Overlap
+
+```{r}
+dtu.l <- readRDS("01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds")
+# select 
+# dtu.l <- select.df.from.nested.list(dtu.l, "POP")
+# select lineage
+dtu.l <- dtu.l$lineage
+# restructure to Condition > celltype
+dtu.l <- list("NS" = lapply(dtu.l, function(x) x[["NS"]]), 
+              "IAV" = lapply(dtu.l, function(x) x[["IAV"]]), 
+              "COV" = lapply(dtu.l, function(x) x[["COV"]])
+              )
+# Add gene names
+# tx2gene = "../../../../../01_Quantif/00_IndexData/02_GENCODEv42_filt-IAV-SARS_Cov_2-tx2gene-with-ENS.tsv"
+# tx2gene <- read.table( tx2gene, header = T, sep = "\t", na.strings = "" )
+# dtu.l <- add.gene_name.2.gene_id(dtu.l,  tx2gene, gene_id.col = "gene_id",  gene_name.col = "gene_name")
+```
+
+- Overlap
+```{r}
+overlap.l <- lapply(dtu.l, function(condition_1){
+  lapply(condition_1, function(celltype){
+    lapply(rotival.l, function(condition_2){
+        test.overlap.pro(m1 = celltype, fdr.col = "fdr", fdr.thres.1 = 0.05, gene.col.1 = "gene_name",
+                       FC.col.1 = NA, FC.thres.1 = NA, 
+                       m2 = condition_2, fdr.col.2 = "fdr", fdr.thres.2 = 0.05, gene.col.2 = "gene_name", 
+                       FC.col.2 = "Delta_psi_AFB_EUB", FC.thres.2 = 0.05) # 
+    })
+  })
+})
+
+# Merge
+overlap.l <- lapply(overlap.l, function(condition_1) lapply(condition_1, function(celltype) plyr::ldply(celltype, .id = "Rotival")))
+overlap.l <- lapply(overlap.l, function(condition_1) plyr::ldply(condition_1, .id = "celltype"))  
+df = plyr::ldply(overlap.l, .id = "Aquino")
+head(df)
+```
+
+- Save
+```{r}
+file.name <- "05_popDTU-Overlaps/01_Processed-Data/06_celltype-fractions/00_popDTU-Aquino2023-vs-Rotival2019.rds"
+saveRDS(df, file.name)
+```
+
+- Add significance label
+```{r}
+require(dplyr)
+# Process df to include y coordinate of label 
+df$model.2.specific <- NULL # model_2 genes will appear in another plot
+df.i <- reshape2::melt(df[ , c("Aquino", "Rotival", "celltype", "shared", "model.1.specific" )]) %>% group_by(celltype, Aquino,Rotival) %>% mutate(label_y = sum(value)) %>% ungroup()
+# add p_value
+df = merge(df.i,
+      df [, c("celltype", "Aquino", "Rotival", "p_value") ], 
+      by = c("celltype", "Aquino", "Rotival"))
+
+df = add.p_value.label(df)
+df
+```
+
+### 2.1.3 Plots
+
+##### OR
+
+```{r}
+# Read data
+file.name <- "05_popDTU-Overlaps/01_Processed-Data/06_celltype-fractions/00_popDTU-Aquino2023-vs-Rotival2019.rds"
+df <- readRDS( file.name )
+# add p_value_label
+df = add.p_value.label(df)
+# subset to MONOCYTES
+df <- df[ df$celltype == "MONO", ]
+# subset to Monocytes and  comparisons of interest 
+df <- df [  df$celltype == "MONO" & df$Aquino  == "NS" & df$Rotival  == "NS" | df$Aquino  == "IAV" & df$Rotival  == "IAV" | df$Aquino  == "COV" & df$Rotival  == "IAV",   ]
+
+# Plot
+df$Condition <- plyr::revalue(df$Aquino, condition.vec.short)
+df$Condition <- factor(df$Condition, levels = rev(condition.vec.short))                         
+color.vec <- condition.color.vec.short
+
+odds.plot <- ggplot(data = df, aes(x = odds.ratio, y = Condition, color = Condition)) + 
+  geom_point(size = 1) + 
+  geom_text(aes(x = odds.ratio, y = Condition, label = p_value_label), color = "black", vjust = -0.5, size = 3.5/.pt) + 
+  geom_vline(aes(xintercept = 1), size = .5, linetype = "dashed", linewidth =0.25) +
+  geom_errorbarh(aes(xmax = conf.int.upper, xmin = conf.int.lower), size = .5,height = .2, linewidth =0.25) + 
+  scale_color_manual(guide = "none", values = color.vec) + 
+  labs(title = "tit", subtitle = "sub_tit") + ylab("y_lab") + xlab("Odds Ratio") + 
+  plot_theme + theme(axis.title.y = element_blank())
+  # theme(panel.background = element_blank(), plot.background = element_blank(), 
+  #       axis.line.x = element_line(), axis.line.y = element_line(),
+  #       axis.text.x = element_text(size = 10, angle = 0, hjust = 0.5), 
+  #       axis.text.y = element_text(size = 10, angle = 0, hjust = 0.5), axis.title.y = element_blank(), 
+  #       legend.position = "none")
+odds.plot
+# Save
+file.name <- "05_popDTU-Overlaps/02_Plots/06_celltype-fractions/02_overlap-Rotival-only-MONO-01_OR.pdf" 
+ggsave(file.name, odds.plot, width = 4, height = 2.5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, odds.plot, width = 4, height = 2.5, units = "cm", bg = "white")
+```
+
+##### BarPlot
+```{r}
+# Read data
+file.name <- "05_popDTU-Overlaps/01_Processed-Data/06_celltype-fractions/00_popDTU-Aquino2023-vs-Rotival2019.rds"
+df <- readRDS( file.name )
+# add p_value_label
+df = add.p_value.label(df)
+# subset to MONOCYTES
+df <- df[ df$celltype == "MONO", ]
+# subset to Monocytes and  comparisons of interest 
+df <- df [  df$celltype == "MONO" & df$Aquino  == "NS" & df$Rotival  == "NS" | df$Aquino  == "IAV" & df$Rotival  == "IAV" | df$Aquino  == "COV" & df$Rotival  == "IAV",   ]
+
+# Factor
+df$Condition <- factor(df$Aquino, levels = rev(names(condition.vec.short)))
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short) 
+color.vec <- condition.vec.short
+
+df <- reshape2::melt( df[, c("Condition", "shared", "model.1.specific", "model.2.specific") ], 
+                      value.name = "n_genes", variable.name = "model")
+df$model <- plyr::revalue(df$mode, c("model.1.specific" = "Aquino 2023", "model.2.specific" = "Rotival 2019")) 
+color.vec <- c("Aquino 2023" = "#4a4e69", "shared" = "#f2e9e4", "Rotival 2019" = "#c9ada7")
+df$model <- factor(df$model, levels = c("Aquino 2023", "shared", "Rotival 2019"))
+
+plt <- ggplot(data = df, aes(x = n_genes, y = Condition, fill = model)) + 
+  geom_bar(stat="identity", color = "black", linewidth=0.25, position = position_stack())  +
+  geom_text(aes(x = n_genes, label = n_genes), vjust=0.5, color= "black", size=3.5/.pt,  
+            position = position_stack(vjust = .5 )) +
+  # geom_text(aes(y = Condition, x = label_x, label = p_value_label),angle = 90, 
+  #           vjust = 1.25, hjust = 0.5, size = 3) +  # p_value
+  scale_fill_manual("", values = color.vec,  drop = F) +
+  labs(title = "Population DTU sharing", subtitle = "Aquino Population DTU vs ROtival 2019") +
+  xlab("N Population DTU Genes") + 
+  plot_theme + 
+  theme(axis.title.y = element_blank())
+  # theme(panel.background = element_blank(), plot.background = element_blank(), 
+  #       axis.line.x = element_line(), axis.line.y = element_line(),
+  #       axis.text.x = element_text(size = 10, angle = 0, hjust = 0.5), 
+  #       axis.text.y = element_text(size = 10, angle = 0, hjust = 0.5), axis.title.y = element_blank()) + 
+  # guides(fill = guide_legend(reverse=TRUE))
+
+# Save
+file.name <- "05_popDTU-Overlaps/02_Plots/06_celltype-fractions/02_overlap-Rotival-only-MONO-02_BarPlot.pdf" 
+ggsave(file.name, plt, width = 5, height = 2.5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 5, height = 2.5, units = "cm", bg = "white")
+```
+
+
+<!-- ### 2.3.4 Rotival popDS DS sharing across conditions -->
+
+<!-- *2025-12-19* We see that popDTU genes are highlighy condition-specific (e.g Baseline, IAV, COV), I want to see Rotival 2019 popDS sharing across conditions* -->
+
+<!-- ```{r} -->
+<!-- df.l = readRDS("05_popDTU-Overlaps/01_Processed-Data/00_Rotival2019-population-DS-parsed.rds") -->
+<!-- df = plyr::ldply(df.l, .id = "Condition") -->
+<!-- # Filter popDS -->
+<!-- "Delta_psi_AFB_EUB" -->
+
+<!-- # Filter by PSI effect size and FDR -->
+<!-- df <- df[ abs(df$Delta_psi_AFB_EUB) > 0.05 & df$fdr < 0.05, ] -->
+<!-- # Condition sharing -->
+<!-- df <- df %>% group_by(gene_name) %>% summarise(n_conditions = n_distinct(Condition)) -->
+<!-- df <- df %>% group_by(n_conditions) %>% summarise(n_genes = n_distinct(gene_name)) -->
+<!-- df <- df %>% mutate(n_genes_rel = n_genes / sum(n_genes)) -->
+<!-- ``` -->
+
+
+

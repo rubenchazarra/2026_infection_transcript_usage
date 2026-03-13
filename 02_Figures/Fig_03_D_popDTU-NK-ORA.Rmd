@@ -1,0 +1,66 @@
+---
+title: "popDE-Enrichment"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## 0. Goal 
+
+Figure 3.  
+- d) Pathway enrichment analysis for baseline NK cell population DTU genes (N=13; Hypergeometric test, FDR < 0.01). Gene Ratio indicates the fraction of DTU genes present in the enriched term gene set.
+
+- Load functions
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/")
+
+suppressPackageStartupMessages(require(enrichplot)) # cannot install this in local!
+suppressPackageStartupMessages(require(ggplot2))
+suppressPackageStartupMessages(require(scales))
+# Run rrvgo
+suppressPackageStartupMessages( require(rrvgo) )
+suppressPackageStartupMessages(require(org.Hs.eg.db))
+```
+
+
+# Fig. 3. D
+
+Figure 3.  
+- d) Pathway enrichment analysis for baseline NK cell population DTU genes (N=13; Hypergeometric test, FDR < 0.01). Gene Ratio indicates the fraction of DTU genes present in the enriched term gene set.
+
+```{r}
+dtu.ora <- readRDS("04_popDTU-ORA/01_Processed-Data/06_celltype-fractions/01_popDTU-ORA-clusterProfiler-GO-BP-01_lineage.rds")
+
+df <- dtu.ora$NK$NS$DTU.all$BP@result %>% filter(p.adjust < 0.01)
+df <- df[order(df$p.adjust), ]
+# n <- 20
+# df <- df[1:n, ]
+df$GeneRatio_numeric <- as.numeric(unlist(lapply(strsplit(df$GeneRatio, "/"), `[[`, 1))) / as.numeric(unlist(lapply(strsplit(df$GeneRatio, "/"), `[[`, 2)))
+df$GeneRatio <- factor(df$GeneRatio, levels = sort(unique(df$GeneRatio)))
+# Order by FDR inside each Gene Ratio
+df <- df %>% arrange(GeneRatio, desc(p.adjust)) %>% mutate(Description = factor(Description, levels = unique(Description)))
+df$Description <- factor(df$Description)
+
+plt <- ggplot(data=df, aes(x = GeneRatio_numeric, y = Description, fill = p.adjust))+ 
+  geom_point(shape=21, aes(size = Count), stroke = 0.1) + 
+  scale_size_continuous("N Genes", range = c(1, 2))  + # shrink point sizes
+  scale_fill_gradient(name = "FDR", low = "#023047", high = "#8ecae6") +
+  scale_y_discrete(labels = function(x) stringr::str_trunc(x, 40) ) +
+  scale_x_continuous(breaks =c(0.2, 0.3, 0.4, 0.5)) + 
+  xlab("Gene Ratio") + # To be more informative "N of genes in enriched term in DTU set"
+  plot_theme + theme(axis.line.x = element_line(linewidth=0.25), 
+                     axis.title.x = element_text(size = 6), axis.title.y=element_blank()) + 
+   guides(
+    fill = guide_colorbar(order = 1, reverse =T),  # FDR legend comes first
+    size = guide_legend(order = 2, override.aes = list(fill = "black"))     # Size legend comes second
+  )
+  
+#  Save
+file.name <- "04_popDTU-ORA/02_Plots/06_celltype-fractions/01_popDTU-ORA-01_lineage-NK_NS_DTU.all-DotPlot.pdf"
+ggsave(file.name, plt, width = 6.25, height = 4.5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 6, height = 5, units = "cm", bg = "white")
+```
+

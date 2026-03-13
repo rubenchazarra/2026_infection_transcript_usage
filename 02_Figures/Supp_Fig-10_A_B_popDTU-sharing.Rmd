@@ -1,0 +1,170 @@
+---
+title: "03_DTU-Viz"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+
+*Supplementary Fig. 10.* Sharing of population-level differential transcript usage (DTU) genes and differentially expressed genes (DEGs) across immune lineages and conditions. 
+- a) Upset plot showing the overlap of population DTU genes across immune lineages and conditions (Baseline, influenza A virus (IAV), and SARS-CoV-2 (COV)). 
+- b) Proportion of population DTU genes detected in each condition combination within each immune lineage.
+ 
+- Load data 
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/02_popDTU/02_DA/")
+```
+
+
+# Supp. Fig. 10. A
+
+*Supplementary Fig. 10.* a) Upset plot showing the overlap of population DTU genes across immune lineages and conditions (Baseline, influenza A virus (IAV), and SARS-CoV-2 (COV)). 
+
+- 2025-05-07 version of the plot with genes tested in all cases 
+```{r}
+dtu.l <- readRDS("01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds")
+dtu.l <- dtu.l$lineage
+dtu.l <- unlist(dtu.l, recursive = F)
+gene.l <- lapply(dtu.l, function(x) x$gene_name)
+# Get intersection of genes tested in all conditions
+gene.vec <- Reduce(intersect, gene.l) 
+```
+
+- Read data 
+```{r}
+file.name <- "01_Processed-Data/06_celltype-fractions/01_popDTU-filtered-list.rds"
+dtu.l <- readRDS(file.name)
+# select lineage
+dtu.l <- dtu.l$lineage
+# unlist one level
+dtu.l <- unlist(dtu.l, recursive = F)
+# Get gene_id
+dtu.l <- lapply(dtu.l, function(x) x$gene_name)
+#Pre-process for upset # prepare.ComplexUpset() is preloaded
+df <- prepare.ComplexUpset(dtu.l)
+# subset to genes tested in all conditions
+# df <- df[ rownames(df) %in% gene.vec, ]
+```
+
+- ComplexUpset Plot 
+```{r}
+# naming
+colnames(df) <-  gsub("(.*)\\.(.*\\..*)", "\\1_\\2", colnames(df))
+name.df <- data.frame(ct_condition = colnames(df))
+name.df$lineage <- gsub("\\..*", "", name.df$ct_condition)
+name.df$lineage <- gsub("_", ".", name.df$lineage)
+name.df$Condition <- gsub(".*\\.", "", name.df$ct_condition)
+name.df <- merge(name.df,  lineage.df[, c("lineage", "color")], by = "lineage", all = T)
+name.df$Condition_2 <- plyr::revalue(name.df$Condition, condition.vec.short)
+name.df$lineage_Condition_2 <- paste0(name.df$lineage, "  ", name.df$Condition_2)
+# subset name.df
+name.df <- name.df[name.df$ct_condition %in% colnames(df), ]
+name.vec <- setNames(name.df$lineage_Condition_2, nm = name.df$ct_condition)
+color.vec <- setNames(name.df$color, nm = name.df$ct_condition)
+```
+
+```{r}
+min_set_size = 1
+font_size = 6
+# Plot
+plt <- ComplexUpset::upset(df, names(df), 
+                           min_size = min_set_size,
+                           set_sizes = FALSE, 
+                           labeller = ggplot2::as_labeller(name.vec), 
+                           name = NULL, 
+                           height_ratio=0.8,
+                           matrix=( intersection_matrix(geom=geom_point(size=0.75))), 
+                           
+                    base_annotations = list(
+                      # Barplot
+                      'N of Population DTU genes' = intersection_size( fill = "#778da9",
+                                                            text = list(size = 4/.pt, angle=90, vjust = 0.5, hjust = -0.2),
+                                                            text_colors = c(on_background = "black",
+                                                                            on_bar = "black")) +
+                                      theme( panel.grid = element_blank(), axis.line = element_line(), 
+                                             axis.title.y = element_text(size = font_size, vjust = -15),
+                                             axis.text.y  = element_text(size = font_size))
+                      ),
+                    themes=upset_modify_themes(
+                      list(
+                        'intersection_size'=theme(text=element_text(size=font_size),
+                                                  plot.margin = margin(0, 0, 0, 0, unit = "cm")),
+                        'intersections_matrix'=theme(text=element_text(size=font_size),
+                                                     plot.margin = margin(0, 0, 0, 0, unit = "cm"))
+                        )), 
+queries=list(upset_query(set= "T_CD4.NS", color = "#355070", fill="#355070"), # Not finding a systematic way of edditing colors !
+             upset_query(set= "T_CD4.IAV", color = "#355070", fill="#355070"), 
+             upset_query(set= "T_CD4.COV", color = "#355070", fill="#355070"), 
+             upset_query(set= "T_CD8.NS", color = "#b56576", fill="#b56576"), 
+             upset_query(set= "T_CD8.IAV", color = "#b56576", fill="#b56576"),
+             upset_query(set= "T_CD8.COV", color = "#b56576", fill="#b56576"),
+             upset_query(set= "MONO.NS", color = "#6d597a", fill="#6d597a"),
+             upset_query(set= "MONO.IAV", color = "#6d597a", fill="#6d597a"),
+             upset_query(set= "MONO.COV", color = "#6d597a", fill="#6d597a"),
+             upset_query(set= "NK.NS", color = "#eaac8b", fill="#eaac8b"),
+             upset_query(set= "NK.IAV", color = "#eaac8b", fill="#eaac8b"),
+             upset_query(set= "NK.COV", color = "#eaac8b", fill="#eaac8b"), # no hits
+             upset_query(set= "B.NS", color = "#e56b6f", fill="#e56b6f"),
+             upset_query(set= "B.IAV", color = "#e56b6f", fill="#e56b6f"), #,
+             upset_query(set= "B.COV", color = "#e56b6f",fill="#e56b6f") # no hits
+             )
+)
+
+plt
+# Save
+file.name <- paste0("02_Plots/06_celltype-fractions/04_01_popDTU-sharing-ComplexUpset-01_lineage-min-set-", min_set_size, ".pdf") # Supp. Fig. 10.A
+ggsave(file.name, plt, width = 16, height = 7, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 16, height = 7, units = "cm", bg = "white")
+```
+
+# Supp. Fig. 10. B 
+
+*Supplementary Fig. 10. b) Proportion of population DTU genes detected in each condition combination within each immune lineage.*
+
+```{r}
+file.name <- "01_Processed-Data/06_celltype-fractions/01_popDTU-unfiltered-list.rds"
+dtu.l <- readRDS(file.name)
+dtu.l <- dtu.l$lineage
+dtu.l <- lapply(dtu.l, function(ct){
+  vec = Reduce(intersect, lapply(ct, function(x) x$gene_name))
+  lapply(ct, function(x) x[x$gene_name %in% vec, ])
+  })
+dtu.l <- lapply(dtu.l, function(ct) plyr::ldply(ct, .id = "Condition"))
+dtu <- plyr::ldply(dtu.l, .id = "lineage")
+dtu <- dtu[dtu$fdr < 0.05, ] # keep DTU
+
+df <- dtu %>% group_by(lineage, is.DGE, gene_name) %>% summarise(n_conditions = n_distinct(Condition), Condition = paste(Condition, collapse = ","))
+df <- df %>% group_by(lineage, Condition) %>% summarise(n_genes = n_distinct(gene_name))
+df <- df %>% group_by(lineage) %>% mutate(n_genes_rel = n_genes /sum(n_genes))
+
+df$Condition <- plyr::revalue(df$Condition, c("NS" = "Baseline", 
+                                              "COV,NS" = "Baseline,COV", "IAV,NS" = "Baseline,IAV", 
+                                              "COV,IAV" = "IAV,COV", "COV,IAV,NS" = "All"))
+
+df$Condition <- factor(df$Condition, levels = c("Baseline", "IAV", "COV","Baseline,IAV","Baseline,COV", 
+                                                "IAV,COV", "All"))
+df$lineage <- factor(df$lineage, levels = rev(lineage.df$lineage))
+color.vec <- c("Baseline" = "#edf2f4", "IAV" = "#75A9D1", "COV" = "#c1121f", 
+               "Baseline,COV" = "#780000", "Baseline,IAV" = "#003049", 
+               "IAV,COV" = "#ffb41f", "All" = "#fdf0d5")
+
+plt <- ggplot(df, aes(y = lineage, x = n_genes, fill = Condition)) + 
+  geom_bar(width=0.8, stat = "identity", #color = "white", 
+           linewidth = 0.25, position = position_stack(reverse = T)) + 
+  # geom_text(aes(label = round(n_genes_rel, 2)), position = position_stack(vjust = 0.5, reverse = T),
+  #           color="black", alpha = 1, size=3/.pt, angle = 90) +
+  # scale_alpha_discrete("", range=c(1, 0.5, 0.25)) +
+  scale_fill_manual(values = color.vec ) +
+  xlab("N of Population DTU Genes") + f
+  # facet_grid(  lineage~. , scales = "free_x", switch = "y") +
+  plot_theme  + theme(axis.title.y = element_blank(), axis.line.y = element_blank())
+plt
+
+# file.name <- "02_Plots/06_celltype-fractions/04_03_popDTU-Condition-sharing-by-lineage-split-DGE.pdf"
+file.name <- "02_Plots/06_celltype-fractions/04_03_popDTU-Condition-sharing-by-lineage-02_abs.pdf"
+ggsave(file.name, plt, width = 5.5, height = 5, units = "cm")
+```

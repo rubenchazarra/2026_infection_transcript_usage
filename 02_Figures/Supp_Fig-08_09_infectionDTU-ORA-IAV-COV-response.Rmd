@@ -1,0 +1,236 @@
+---
+title: "infectionDE-Enrichment"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+
+*Supplementary Fig. 8*. Overrepresentation analysis (ORA) of infection-associated DTU genes in response to SARS-CoV-2 (COV) across immune lineages. ORA was performed for different DTU gene sets: all DTU genes (DTU); DTU genes overlapping with differentially expressed genes (DTU–DGE); and DTU–DGE genes further stratified into upregulated (DTU–DGE Up) and downregulated (DTU–DGE Down) categories. Shown are Gene Ontology (GO) biological process terms with FDR < 0.05. Point color represents –log₁₀(FDR), and point size reflects the enrichment odds ratio.
+
+AND
+
+*Supplementary Fig. 9*. Overrepresentation analysis (ORA) of infection-associated DTU genes in response to influenza A (IAV) across immune lineages. ORA was performed for different DTU gene sets: all DTU genes (DTU); DTU genes overlapping with differentially expressed genes (DTU–DGE); and DTU–DGE genes further stratified into upregulated (DTU–DGE Up) and downregulated (DTU–DGE Down) categories. Shown are Gene Ontology (GO) biological process terms with FDR < 0.05. Point color represents –log₁₀(FDR), and point size reflects the enrichment odds ratio.
+
+
+- Load packages
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/01_infectionDTU/02_DA/")
+
+suppressPackageStartupMessages(require(enrichplot)) 
+suppressPackageStartupMessages(require(ggplot2))
+suppressPackageStartupMessages(require(scales))
+suppressPackageStartupMessages( require(rrvgo) )
+suppressPackageStartupMessages(require(org.Hs.eg.db))
+```
+
+
+
+# 1. Data Processing
+
+## 1.1 Restructure
+- Get significant ORA results, and restructure data for plotting
+
+```{r}
+dtu.ora <- readRDS("04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-ORA-clusterProfiler-GO-01_lineage.rds")
+
+get.result.ora <- function ( df, fdr.thres ) {
+  if ( class(df) == "list" ) { lapply (df, function(df) get.result.ora(df, fdr.thres))
+  } else { # class == "enrichResult"
+    if(!is.null(df)){
+    df = df@result # get data.frame
+    df = df[ df$p.adjust < fdr.thres, ]
+    return(df)
+    }
+  }
+}
+
+dtu.ora = get.result.ora(dtu.ora,fdr.thres = 0.05)
+
+# Restructure to cell type > database > condition > subset
+# 1. Restucture to cell type > condition > database > subset
+dtu.ora = lapply(dtu.ora, function(ct)
+  lapply(ct, function(cond){
+    list(
+      "BP" = lapply(cond, function(x) x[["BP"]]) # , 
+      # "MF" = lapply(cond, function(x) x[["MF"]]), # excluding these databases in last run
+      # "CC" = lapply(cond, function(x) x[["CC"]])
+      )
+  }))
+
+# 2. Restucture to cell type > database > condition > subset
+dtu.ora = lapply(dtu.ora, function(ct){
+    list(
+      "BP" = lapply(ct, function(x) x[["BP"]])#, 
+      #"MF" = lapply(ct, function(x) x[["MF"]]),
+      #"CC" = lapply(ct, function(x) x[["CC"]])
+      )
+  })
+
+# Merge
+## By set
+dtu.ora <- lapply(dtu.ora, function(ct)
+  lapply(ct, function(db)
+    lapply(db, function(cond) plyr::ldply(cond, .id = "set"))
+  ))
+
+## By Condition
+dtu.ora <- lapply(dtu.ora, function(ct)
+  lapply(ct, function(db) plyr::ldply(db, .id = "Condition"))
+  )
+
+## unlist 1 level 
+dtu.ora <- unlist(dtu.ora, recursive = F)
+# remove  empty
+dtu.ora <- dtu.ora[ unlist(lapply(dtu.ora, nrow)) > 0 ]
+
+# Save grouped data
+file.name <- "04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/02_infectionDTU-ORA-filtered-grouped-01_lineage.rds"
+saveRDS( dtu.ora, file.name )
+```
+
+## 1.2 Add Odds Ratio to ORA results based on GeneRatio and BgRatio values 
+
+```{r}
+# Add Odds Ratio (and 95% CI) to clusterProfiler enrichGO results
+add_enrichment_or <- function(enrich_res, method = c("fisher", "closed_form")) {
+  if(class(enrich_res) == "list"){ 
+    lapply(enrich_res, function(x) add_enrichment_or(x, method = c("fisher", "closed_form")))
+  }else{
+  method <- match.arg(method)
+  df <- as.data.frame(enrich_res)
+
+  if (!all(c("GeneRatio", "BgRatio", "Count") %in% names(df))) {
+    stop("Expected columns 'GeneRatio', 'BgRatio', and 'Count' not found.")
+  }
+
+  # Parse ratios safely
+  parse_ratio_num <- function(x, idx) {
+    # idx=1 numerator, idx=2 denominator
+    as.numeric(vapply(strsplit(x, "/", fixed = TRUE), function(z) z[[idx]], FUN.VALUE = character(1L)))
+  }
+
+  k <- as.numeric(df$Count)                                   # overlap in query ∩ term
+  n <- parse_ratio_num(df$GeneRatio, 2L)                      # size of query
+  M <- parse_ratio_num(df$BgRatio, 1L)                        # term size in background
+  N <- parse_ratio_num(df$BgRatio, 2L)                        # background size
+
+  # Sanity checks to catch inconsistencies early
+  bad <- is.na(k) | is.na(n) | is.na(M) | is.na(N) | k > n | k > M | n > N | M > N
+  if (any(bad)) {
+    warning("Some rows have inconsistent counts; OR set to NA for those rows.")
+  }
+
+  # Compute ORs
+  or <- rep(NA_real_, nrow(df))
+  ci_lo <- rep(NA_real_, nrow(df))
+  ci_hi <- rep(NA_real_, nrow(df))
+
+  for (i in seq_len(nrow(df))) {
+    if (bad[i]) next
+
+    a <- k[i]
+    b <- n[i] - k[i]
+    c <- M[i] - k[i]
+    d <- N[i] - M[i] - b
+
+    if (any(c(a, b, c, d) < 0)) {
+      next
+    }
+
+    if (method == "fisher") {
+      # Why: fisher.test gives finite OR + exact CI, handles zeros better than closed-form
+      mat <- matrix(c(a, b, c, d), nrow = 2,
+                    dimnames = list(c("Query", "NotQuery"), c("InTerm", "NotInTerm")))
+      ft <- suppressWarnings(fisher.test(mat, alternative = "greater"))
+      or[i] <- unname(ft$estimate)
+      ci_lo[i] <- ft$conf.int[1]
+      ci_hi[i] <- ft$conf.int[2]
+    } else {
+      # Closed-form; may be Inf with zeros
+      num <- a * d
+      den <- b * c
+      if (den == 0) {
+        or[i] <- Inf
+        ci_lo[i] <- NA_real_
+        ci_hi[i] <- NA_real_
+      } else {
+        or[i] <- num / den
+        ci_lo[i] <- NA_real_
+        ci_hi[i] <- NA_real_
+      }
+    }
+  }
+
+  df$odds_ratio <- or
+  df$or_ci_low  <- ci_lo
+  df$or_ci_high <- ci_hi
+  df
+  }
+}
+# Run OR
+file.name <- "04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/02_infectionDTU-ORA-filtered-grouped-01_lineage.rds"
+dtu.ora <- readRDS(file.name)
+dtu.ora <-  add_enrichment_or(dtu.ora, method="fisher")
+saveRDS(dtu.ora, file.name)
+```
+
+
+# Supp. Fig. 8. /9. ORA for 
+
+*Supplementary Fig. 8. Overrepresentation analysis (ORA) of infection-associated DTU genes in response to SARS-CoV-2 (COV) across immune lineages. ORA was performed for different DTU gene sets: all DTU genes (DTU); DTU genes overlapping with differentially expressed genes (DTU–DGE); and DTU–DGE genes further stratified into upregulated (DTU–DGE Up) and downregulated (DTU–DGE Down) categories. Shown are Gene Ontology (GO) biological process terms with FDR < 0.05. Point color represents –log₁₀(FDR), and point size reflects the enrichment odds ratio.*
+
+- Load data
+```{r}
+file.name <- "04_infectionDTU-ORA/01_Processed-Data/05_Filt-1-5-0.8-0.01/02_infectionDTU-ORA-filtered-grouped-01_lineage.rds"
+dtu.ora <- readRDS( file.name )
+# Rename
+names(dtu.ora) <-  gsub(".BP", "", names(dtu.ora))
+## Merge By lineage
+dtu.ora <- plyr::ldply(dtu.ora, .id = "lineage")
+dtu.ora <- dtu.ora[dtu.ora$Condition %in% c("IAV.NS", "COV.NS"), ]
+  
+df <- dtu.ora
+df$lineage <- factor(df$lineage, levels = lineage.df$lineage)
+df$Condition <- factor(df$Condition, levels = names(condition.pairwise.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+df$set <- factor(df$set, levels = c("DTU.all", "DTU.unique", "DTU.DGE", "DTU.DGE.Up", "DTU.DGE.Down"))
+df$set <- plyr::revalue(df$set, c("DTU.all" = "DTU", "DTU.unique" = "DTU unique",
+                                    "DTU.DGE" = "DTU-DGE", "DTU.DGE.Up" = "DTU-DGE Up", "DTU.DGE.Down" ="DTU-DGE Down"))
+
+# subset
+# df <- df[df$p.adjust < 0.05 & df$Condition %in% "IAV-Baseline", ]
+df <- df[df$p.adjust < 0.05 & df$Condition %in% "COV-Baseline", ]
+
+# Plot
+plt <- ggplot(df, aes(x = set, y = Description, fill = -log10(p.adjust))) + # color by log10FDR
+  geom_point( shape=21, aes(size = odds_ratio)) +
+  facet_grid( Condition ~ lineage, scales = "free",  space = "free", switch = "y") +
+  labs(title = "ORA BP", subtitle = "FDR < 0.05") + #xlab("Cell type") +
+  scale_fill_viridis_c(name = "-log10(FDR)") +
+  scale_y_discrete(labels = function(x) stringr::str_trunc(x, 40), limits=rev ) +
+  scale_size_continuous("Odds Ratio", range = c(1, 3.5), breaks = c(2, 5, 10, 15, 20, 60)) +
+  scale_x_discrete(drop=T) +
+  plot_theme + 
+      theme(axis.title.y = element_blank(),
+          axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+          axis.title.x = element_blank(),
+          axis.text.y = element_text(size = 5),
+          panel.background = element_rect(fill = "white"),
+          axis.line.x = element_line(), axis.line.y = element_line(),
+          strip.background = element_rect(fill = NA, color = "black", size = 1),
+          panel.grid = element_line(color = "grey", linewidth = 0.05),
+          strip.placement = "outside")
+
+# Save
+## Supplementary Fig 8. 
+file.name <- "04_infectionDTU-ORA/02_Plots/05_Filt-1-5-0.8-0.01/02_02_infection-ORA-all-celltypes-01_lineage-COV.NS_size-by-OR.pdf"
+## Supplementary Fig 9.
+# file.name <- "04_infectionDTU-ORA/02_Plots/05_Filt-1-5-0.8-0.01/02_02_infection-ORA-all-celltypes-01_lineage-IAV.NS_size-by-OR.pdf"
+ggsave(file.name, plt, height = 20, width = 20, units="cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, height = 20, width = 20,  units = "cm", bg = "white")
+```

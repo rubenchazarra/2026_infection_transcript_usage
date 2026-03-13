@@ -1,0 +1,73 @@
+---
+title: "03_DTU-DA"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+
+- Infection DTU Data Analysis
+
+Code to generate Supplementary Fig. 4.A
+
+- Functions
+```{r}
+source("../../../../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../03_Differential/02_DTU/02_DTU/01_infectionDTU/02_DA") # come back to notebook 
+```
+
+# Supplementary Fig. 4.A
+
+*Permutation of infection DTU analysis* 
+a) Permutation analysis for infection-associated DTU detection. Under the original (non-permuted) infection DTU analysis, in each viral response (e.g. influenza A virus (IAV)-Baseline, SARS-CoV-2 (COV)-Baseline), equivalence class (EC) differences were computed between matched infected and baseline samples from the same donor. (e.g. Donor1 Infected-Donor1 Baseline,  Donor2 Infected-Donor2 Baseline). Here, instead, we randomly shuffled the condition labels across donors, such that EC ratio differences were calculated between mismatched infected and baseline samples (e.g., Donor1 Infected-Donor1 Baseline,  Donor2 Baseline-Donor2 Infected). This procedure was repeated 100 times, and the infection DTU analysis was performed for each permutation. Boxplots show the number of significant DTU genes detected per permutation (center line: median; box limits: upper and lower quartiles; whiskers: 1.5× interquartile range; points: outliers). 
+
+## Process
+- Read & Process permutation data
+```{r}
+count_sig_permuted <- function(df){
+  ## Filter a dataframe by fdr.col{
+  if(class(df) == "list"){ lapply(df, count_sig_permuted )
+    } else {df %>% summarise(n_genes = sum(fdr < 0.05)) }
+}
+
+file.l <- list("lineage" = read.RDS.files(path = "../01_infectionDTU/05_Filt-1-5-0.8-0.01/01_lineage/", pattern = "infectionDTU-permutations-x100.rds"))#, 
+               #"celltype" = read.RDS.files(path = "../01_infectionDTU/05_Filt-1-5-0.8-0.01/02_celltype/", pattern = "infectionDTU-permutations.rds"))
+
+dtu.l <- count_sig_permuted(file.l)
+# Process
+# Merge By covariate
+dtu.l = lapply(dtu.l, function(l) lapply(l, function(celltype) lapply(celltype, function(condition) lapply(condition, function(it) plyr::ldply(it, .id = "covariate")))))
+## By Condition
+dtu.l = lapply(dtu.l, function(l) lapply(l, function(celltype) lapply(celltype, function(it) plyr::ldply(it, .id = "iteration"))))
+# By iteration
+dtu.l = lapply(dtu.l, function(l) lapply(l, function(celltype) plyr::ldply(celltype, .id = "Condition")))
+# By celltype
+dtu.l = lapply(dtu.l, function(l) plyr::ldply(l, .id = "lineage"))
+# Save count
+saveRDS(dtu.l, "01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-permutation-n-significant-DTU-count.rds")
+```
+
+## Plot 
+```{r}
+dtu.l <- readRDS("01_Processed-Data/05_Filt-1-5-0.8-0.01/01_infectionDTU-permutation-n-significant-DTU-count.rds")
+dtu <- dtu.l$lineage
+df <- dtu[dtu$covariate %in% "Intercept" & dtu$Condition %in% c("IAV.NS", "COV.NS"), ]
+df$Condition <- factor(df$Condition, levels = names(condition.pairwise.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.pairwise.vec.short)
+df$celltype <- factor(df$lineage, levels = rev(lineage.df$lineage))
+
+plt <- ggplot(data = df, aes(y = celltype)) + 
+  geom_boxplot(aes(x = n_genes), fill = "grey", outlier.colour = "grey50", outlier.size = 0.5, linewidth = 0.25 )+ 
+  facet_grid( Condition ~ ., scales = "free_x", switch = "y") +
+  scale_color_manual("Lineage", values = lineage.color.vec, drop = F) +
+  labs(title = "tit", subtitle = "sub_tit") + xlab("Permutation (N=100) infection DTU genes") + ylab("y_lab") + 
+  plot_theme + theme( axis.title.y = element_blank(), axis.title.x = element_text(hjust = 1)) + 
+  guides(fill = FALSE, color = FALSE ) 
+# Save
+file.name <- "02_Plots/05_Filt-1-5-0.8-0.01/06_infectionDTU-permutations-x100-01_lineage-InterceptOnly-by-Condition.pdf" # Supplementary Fig. 4.A
+ggsave(file.name, plt, width = 4, height = 5, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 4, height = 5, units = "cm", bg = "white")
+```

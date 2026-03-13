@@ -1,0 +1,90 @@
+---
+title: "N-iso-gene"
+author: "Ruben Chazarra Gil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# 0. Goal 
+-  Plotting Fig_01_C which is the "cell EC diversity" metric, defined as the mean number of expressed ECs (count > 0) per gene in each cell, restricting the analysis to genes with at least two annotated transcripts.
+
+# 0. Load functions
+```{r}
+source("../../../01_Randolph2021/05_Differential-Analyses/00_Scripts/00_DA-Functions.R")
+source("../../../01_Randolph2021/05_Differential-Analyses/02_DTU/00_Scripts/00_MANTA-functions.R")
+source("../../00_MetaData/03_Aesthetics-repo.R")
+setwd("../04_EC-charac/08_Tx-diversity/")
+```
+
+# 1. Plot "cell EC diversity" metric
+
+*Calculated in ../01_Analysis/01_Calculate-cell-EC-diversity-metric.R*
+
+## 1.1. Merge data 
+*Note: EC diversity is calculated for all cells in each immune lineage - Condition combination (e.g. CD4+ T-Baseline, CD4+T-IAV, CD4+T-COV), this is why we merge the data to a single table*
+
+- Not Downsampled (raw data)
+```{r}
+l <- read.RDS.files("00_Raw-Data/01_01_Cell-metric/", pattern = "EC-diversity-cell-metric.rds")
+l <- lapply(l, function(ct) lapply(ct, function(condition) condition[["RNA"]]))
+l <- lapply(l, function(ct) data.table::rbindlist(ct))
+df <- data.table::rbindlist(l)
+head(df)
+saveRDS(df, "01_Processed-Data/01_01_Tx-diversity-N-ECs-gene-cell-01_lineage-RawCounts.rds")
+```
+
+- Downsampled (subsampling each immune lineage EC x cell UMI matrix to a common minimum UMI count per cell to account for differences in sequencing depth among baseline, IAV and COV cells. The motivation to do this was the observation that IAV and COV-infected cells had higher UMI counts) 
+```{r}
+l <- read.RDS.files("00_Raw-Data/01_01_Cell-metric/", pattern = "downsample-equal-nCount-per-cell.rds")
+l <- lapply(l, function(ct) lapply(ct, function(condition) condition[["RNA"]]))
+l <- lapply(l, function(ct) data.table::rbindlist(ct))
+df <- data.table::rbindlist(l)
+head(df)
+saveRDS(df, "01_Processed-Data/01_01_Tx-diversity-N-ECs-gene-cell-subsample-equal-nCount.rds")
+```
+
+## 1.2 Cell EC diversity Horizontal Barplot
+```{r}
+# Plot
+df <- readRDS( "01_Processed-Data/01_01_Tx-diversity-N-ECs-gene-cell-01_lineage-RawCounts.rds")
+# df <- readRDS( "01_Processed-Data/01_01_Tx-diversity-N-ECs-gene-cell-subsample-equal-nCount.rds") # Subsample
+df$lineage <- factor(df$lineage, levels = names(lineage.color.vec))
+df$Condition <- factor(df$Condition, levels = names(condition.vec.short))
+df$Condition <- plyr::revalue(df$Condition, condition.vec.short)
+n_cells <- length(unique(df$Library_Barcode))
+tit <- "Subsample to equal nCount per cell"
+sub_tit <- paste0("Approach 1 | N cells = ", n_cells)
+
+plt <- ggplot(df, aes(x = Condition, y = mean_n_ec_gene_cell, fill = Condition, group = Condition)) +
+  geom_boxplot( outlier.colour = "grey50", outlier.size = 0.25, outliers = FALSE, linewidth=0.25) +
+  ggpubr::stat_compare_means(method = "wilcox.test",
+                             comparisons = list(c("Baseline","IAV"), #c("IAV","COV"), 
+                                                c("Baseline","COV")),
+                             #label.x = rep(c(1.5, 1.52), times = 5), # For NO subsample
+                             label.y = rep(c(1.78, 1.8), times = 5), # For Subsample
+                             tip.length=0.01,
+                             vjust = 0.8,
+                             size = 3.5/.pt,
+                             bracket.size = 0.25,
+                             label = "p.signif", hide.ns = F,
+                             symnum.args = list(cutpoints = c(0, 0.01, 1), 
+                                                symbols = c( "*", "ns")))+
+  scale_fill_manual("Cells", values = condition.color.vec.short) + 
+  facet_grid( ~lineage) + 
+  ylab("Condition") + ylab("Cell EC diversity") + 
+  plot_theme + theme(plot.title = element_blank(), plot.subtitle = element_blank(),
+                     axis.title.x = element_blank(), 
+                     axis.text.x = element_blank(), axis.ticks.x = element_blank(), # axis.line.x = element_blank(), 
+                     legend.position = "right"
+                     #axis.title.x = element_text(hjust = 1)
+                     ) + 
+  labs(title = tit, subtitle = sub_tit )
+
+plt
+
+file.name <- "02_Plots/04_01_Tx-diversity-all-cells-01_approach1-02_Horizontal.pdf" # No Subsample
+# file.name <- "02_Plots/04_01_Tx-diversity-all-cells-01_approach1-subsample-equal-nCount.pdf" # Subsample
+ggsave(file.name, plt, width = 7.5, height = 4, units = "cm")
+file.name <- gsub(".pdf", ".svg", file.name)
+ggsave(file.name, plt, width = 7.5, height = 4, units = "cm")
+```
